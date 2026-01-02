@@ -1,3 +1,0 @@
-module.exports=[18520,e=>e.a(async(a,c)=>{try{let a=await e.y("@libsql/client-6da938047d5fc1cd");e.n(a),c()}catch(e){c(e)}},!0),43793,e=>e.a(async(a,c)=>{try{var l=e.i(18520),s=e.i(97289),t=a([l]);[l]=t.then?(await t)():t,s.default.config();let i=process.env.TURSO_DATABASE_URL||"file:dummy.db",n=process.env.TURSO_AUTH_TOKEN||"";process.env.TURSO_DATABASE_URL||console.warn("⚠️ TURSO_DATABASE_URL is missing. DB calls will fail.");let A=(0,l.createClient)({url:i,authToken:n});e.s(["db",0,A]),c()}catch(e){c(e)}},!1)];
-
-//# sourceMappingURL=%5Broot-of-the-server%5D__9735484e._.js.map

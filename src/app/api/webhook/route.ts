@@ -19,7 +19,11 @@ async function initBot() {
 
     bot = new Bot<any>(process.env.BOT_TOKEN);
 
-    bot.use(session({ initial: () => ({}) }));
+    // Use In-Memory Session (Note: Conversations reset on restart)
+    bot.use(session({
+        initial: () => ({}),
+    }));
+
     bot.use(conversations());
 
     // Register Conversations (casted to any to avoid type complexity in build)

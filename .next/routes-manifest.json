@@ -23,6 +23,12 @@
   "dynamicRoutes": [],
   "staticRoutes": [
     {
+      "page": "/",
+      "regex": "^/(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/(?:/)?$"
+    },
+    {
       "page": "/_global-error",
       "regex": "^/_global\\-error(?:/)?$",
       "routeKeys": {},

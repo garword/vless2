@@ -4,9 +4,7 @@ const nextConfig = {
     typescript: {
         ignoreBuildErrors: true,
     },
-    experimental: {
-        serverComponentsExternalPackages: ["grammy", "@libsql/client"],
-    },
+    serverExternalPackages: ["grammy", "@libsql/client"],
 };
 
 module.exports = nextConfig;

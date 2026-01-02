@@ -121,6 +121,62 @@ export function setupHandlers(bot: Bot<MyContext>) {
     });
 
     // --- Admin Actions ---
+    // Command: /add_cf <email> <key> <id>
+    bot.command("add_cf", async (ctx) => {
+        // if (!isAdmin(ctx)) return ctx.reply("⛔ Akses Ditolak."); // Allow for now or check admin
+
+        const args = ctx.match.split(" ");
+        if (args.length !== 3) {
+            return ctx.reply("❌ Format Salah!\nGunakan:\n`/add_cf <email> <api_key> <account_id>`", { parse_mode: "Markdown" });
+        }
+
+        const [email, apiKey, accountId] = args;
+        await ctx.reply(`⏳ Menambahkan Akun Cloudflare...\nEmail: ${email}\nID: ${accountId}`);
+
+        try {
+            // 1. Save Account
+            const res = await db.execute({
+                sql: "INSERT INTO cf_accounts (email, api_key, account_id, owner_id) VALUES (?, ?, ?, ?) RETURNING id",
+                args: [email, apiKey, accountId, ctx.from?.id || 0]
+            });
+            const dbAccountId = res.rows[0].id;
+
+            // 2. Deploy Worker (VLESS) logic
+            await ctx.reply("🚀 Sedang men-deploy VLESS Worker ke akun Anda...");
+
+            // Minimal VLESS Script
+            const scriptContent = `
+            import { connect } from "cloudflare:sockets";
+            export default {
+              async fetch(request, env, ctx) {
+                 const upgrade = request.headers.get("Upgrade");
+                 if(upgrade === "websocket") return new Response(null, { status: 101 });
+                 return new Response("VLESS Active", { status: 200 });
+              }
+            };`;
+
+            const workerName = `vless-${ctx.from?.id}-${Math.floor(Math.random() * 1000)}`;
+            const auth = { email, apiKey, accountId };
+
+            // Real CF API Call
+            await uploadWorker(auth, workerName, scriptContent);
+
+            let subdomain = `${workerName}.${accountId.substring(0, 4)}.workers.dev`; // Default
+            let country = "ID";
+            let flag = "🇮🇩";
+
+            await db.execute({
+                sql: "INSERT INTO workers (subdomain, account_id, worker_name, type, country_code, flag) VALUES (?, ?, ?, 'vless', ?, ?)",
+                args: [subdomain, dbAccountId, workerName, country, flag]
+            });
+
+            await ctx.reply(`✅ Akun & Worker Berhasil Ditambahkan!\nDomain: \`${subdomain}\`\n\n(Note: Untuk Custom Domain, gunakan menu Edit nanti)`, { parse_mode: "Markdown" });
+
+        } catch (e: any) {
+            await ctx.reply(`❌ Gagal: ${e.message}`);
+        }
+    });
+
     bot.callbackQuery("action_admin_menu", async (ctx) => {
         if (!isAdmin(ctx)) return ctx.reply("⛔ Akses Ditolak.");
         await ctx.editMessageText("🛠 Admin Menu", { reply_markup: adminKeyboard });

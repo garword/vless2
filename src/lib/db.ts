@@ -4,8 +4,9 @@ import dotenv from "dotenv";
 dotenv.config();
 
 
-const url = process.env.TURSO_DATABASE_URL || "file:dummy.db";
-const authToken = process.env.TURSO_AUTH_TOKEN || "";
+// Use a dummy HTTP URL ensuring no local FS access is attempted during build
+const url = process.env.TURSO_DATABASE_URL || "https://dummy-db-url.com";
+const authToken = process.env.TURSO_AUTH_TOKEN || "dummy-token";
 
 if (!process.env.TURSO_DATABASE_URL) {
     console.warn("⚠️ TURSO_DATABASE_URL is missing. DB calls will fail.");
