@@ -1,0 +1,97 @@
+export type CFAuth = {
+    email: string;
+    apiKey: string; // Global API Key or Token
+    accountId: string;
+};
+
+const CF_API_URL = "https://api.cloudflare.com/client/v4";
+
+async function cfRequest(endpoint: string, method: string, auth: CFAuth, body?: any) {
+    const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+    };
+
+    // Support both Token (Bearer) and Global Key (X-Auth)
+    if (auth.apiKey.startsWith("Bearer ")) {
+        headers["Authorization"] = auth.apiKey;
+    } else {
+        headers["X-Auth-Email"] = auth.email;
+        headers["X-Auth-Key"] = auth.apiKey;
+    }
+
+    const response = await fetch(`${CF_API_URL}${endpoint}`, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+    });
+
+    const data = await response.json();
+    if (!data.success) {
+        throw new Error(`CF API Error: ${data.errors[0]?.message || JSON.stringify(data.errors)}`);
+    }
+    return data.result;
+}
+
+export async function uploadWorker(auth: CFAuth, workerName: string, scriptContent: string) {
+    // Upload config and script. For simple Module workers, we upload metadata + part.
+    // Ease of use: use the standard script upload endpoint (PUT /accounts/:id/workers/scripts/:name)
+    // Note: This requires the script to be valid JS/Module.
+
+    // We need to send it as a FormData or raw JS depending on type.
+    // For simplicity, we assume standard ES Module worker.
+
+    const formData = new FormData();
+    formData.append("metadata", JSON.stringify({ main_module: "index.js", compatibility_date: "2023-01-01" }));
+    formData.append("index.js", new Blob([scriptContent], { type: "application/javascript+module" }));
+
+    // Need to use raw fetch for FormData to let browser/node handle boundary
+    const headers: Record<string, string> = {};
+    if (auth.apiKey.startsWith("Bearer ")) {
+        headers["Authorization"] = auth.apiKey;
+    } else {
+        headers["X-Auth-Email"] = auth.email;
+        headers["X-Auth-Key"] = auth.apiKey;
+    }
+
+    const res = await fetch(`${CF_API_URL}/accounts/${auth.accountId}/workers/scripts/${workerName}`, {
+        method: "PUT",
+        headers,
+        body: formData,
+    });
+
+    const data = await res.json();
+    if (!data.success) {
+        throw new Error(`CF Upload Error: ${data.errors[0]?.message || JSON.stringify(data.errors)}`);
+    }
+    return data.result;
+}
+
+// Support for Custom Domains (better for deep subdomains/SSL)
+export async function addWorkerDomain(auth: CFAuth, accountId: string, workerName: string, hostname: string, zoneId: string) {
+    return cfRequest(`/accounts/${accountId}/workers/domains`, "PUT", auth, {
+        hostname,
+        service: workerName,
+        zone_id: zoneId
+    });
+}
+
+export async function addWorkerRoute(auth: CFAuth, zoneId: string, pattern: string, workerName: string) {
+    return cfRequest(`/zones/${zoneId}/workers/routes`, "POST", auth, {
+        pattern,
+        script: workerName,
+    });
+}
+
+export async function createDNSRecord(auth: CFAuth, zoneId: string, name: string, content: string = "192.0.2.1", type: string = "A", proxied: boolean = true) {
+    return cfRequest(`/zones/${zoneId}/dns_records`, "POST", auth, {
+        type,
+        name,
+        content,
+        proxied,
+        ttl: 1 // automatic
+    });
+}
+
+export async function getZones(auth: CFAuth) {
+    return cfRequest(`/zones`, "GET", auth);
+}
