@@ -135,6 +135,7 @@ export function setupHandlers(bot: Bot<MyContext>) {
 
         try {
             // 1. Save Account
+            await ctx.reply("2️⃣ Menyimpan ke Database...");
             const res = await db.execute({
                 sql: "INSERT INTO cf_accounts (email, api_key, account_id, owner_id) VALUES (?, ?, ?, ?) RETURNING id",
                 args: [email, apiKey, accountId, ctx.from?.id || 0]
@@ -142,7 +143,7 @@ export function setupHandlers(bot: Bot<MyContext>) {
             const dbAccountId = res.rows[0].id;
 
             // 2. Deploy Worker (VLESS) logic
-            await ctx.reply("🚀 Sedang men-deploy VLESS Worker ke akun Anda...");
+            await ctx.reply("3️⃣ Deploying VLESS Worker ke Cloudflare...");
 
             // Minimal VLESS Script
             const scriptContent = `
@@ -170,10 +171,17 @@ export function setupHandlers(bot: Bot<MyContext>) {
                 args: [subdomain, dbAccountId, workerName, country, flag]
             });
 
-            await ctx.reply(`✅ Akun & Worker Berhasil Ditambahkan!\nDomain: \`${subdomain}\`\n\n(Note: Untuk Custom Domain, gunakan menu Edit nanti)`, { parse_mode: "Markdown" });
+            // 3. Save Worker
+            await ctx.reply("4️⃣ Menyimpan Worker ke Database...");
+            await db.execute({
+                sql: "INSERT INTO workers (subdomain, account_id, worker_name, type, country_code, flag) VALUES (?, ?, ?, 'vless', ?, ?)",
+                args: [subdomain, dbAccountId, workerName, country, flag]
+            });
+
+            await ctx.reply(`✅ **SUKSES! Akun & Worker Ditambahkan.**\n\n📌 **Detail:**\n- Domain: \`${subdomain}\`\n- Status: Aktif\n\nSilahkan cek menu list untuk melihat.`, { parse_mode: "Markdown" });
 
         } catch (e: any) {
-            await ctx.reply(`❌ Gagal: ${e.message}`);
+            await ctx.reply(`❌ **PROSES GAGAL!**\n\n⚠️ **Penyebab:**\n${e.message}\n\nMohon periksa kembali API Key dan Account ID Anda.`);
         }
     });
 
@@ -189,7 +197,7 @@ export function setupHandlers(bot: Bot<MyContext>) {
         if (vercelUrl.endsWith('/')) vercelUrl = vercelUrl.slice(0, -1);
         if (!vercelUrl.includes('/api/webhook')) vercelUrl += '/api/webhook';
 
-        await ctx.reply(`⏳ Setup Feeder Cloudflare...\nTarget Channel: ${channelId}`);
+        await ctx.reply(`🔍 **Memulai Setup Feeder...**\nTarget Channel: ${channelId}`);
 
         try {
             const auth: any = { email, apiKey, accountId };
@@ -197,6 +205,7 @@ export function setupHandlers(bot: Bot<MyContext>) {
             const secret = Math.random().toString(36).substring(7);
 
             // 1. Upload Worker
+            await ctx.reply("1️⃣ Mengupload Script Monitor...");
             const MONITOR_SCRIPT = `
             export default {
                 async scheduled(event, env, ctx) {
@@ -212,25 +221,28 @@ export function setupHandlers(bot: Bot<MyContext>) {
                 }
             };`;
 
-            await uploadWorker(auth, workerName, MONITOR_SCRIPT);
+            await uploadWorker(auth, workerName, MONITOR_SCRIPT).catch(e => { throw new Error(`Gagal Upload Script: ${e.message}`); });
 
             // 2. Set Env
+            await ctx.reply("2️⃣ Mengkonfigurasi Environment...");
             await updateWorkerEnv(auth, workerName, {
                 BOT_API_URL: vercelUrl,
                 BOT_SECRET: secret
-            });
+            }).catch(e => { throw new Error(`Gagal Set Env: ${e.message}`); });
 
             // 3. Set Cron
-            await updateWorkerCron(auth, workerName, ["*/5 * * * *"]);
+            await ctx.reply("3️⃣ Mengaktifkan Cron Trigger...");
+            await updateWorkerCron(auth, workerName, ["*/5 * * * *"]).catch(e => { throw new Error(`Gagal Set Cron: ${e.message}`); });
 
             // 4. Save Settings
+            await ctx.reply("4️⃣ Menyimpan Pengaturan...");
             await db.execute({ sql: "INSERT OR REPLACE INTO settings (key, value) VALUES ('monitor_channel_id', ?)", args: [channelId] });
             await db.execute({ sql: "INSERT OR REPLACE INTO settings (key, value) VALUES ('monitor_secret', ?)", args: [secret] });
 
-            await ctx.reply("✅ Feeder Berhasil Di-setup!\nWorker akan memanggil bot setiap 5 menit.", { reply_markup: backToMainKeyboard });
+            await ctx.reply("✅ **SUKSES SETUP FEEDER!**\n\nRobot pemantau sudah aktif.\nIa akan mengecek status server setiap 5 menit.", { reply_markup: backToMainKeyboard });
 
         } catch (err: any) {
-            await ctx.reply(`❌ Gagal Setup Feeder: ${err.message}`);
+            await ctx.reply(`❌ **SETUP GAGAL!**\n\n⚠️ **Penyebab:**\n${err.message}`);
         }
     });
 
