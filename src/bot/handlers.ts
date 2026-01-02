@@ -121,13 +121,13 @@ export function setupHandlers(bot: Bot<MyContext>) {
     });
 
     // --- Admin Actions ---
-    // Command: /add_cf <email> <key> <id>
+    // Command: /add_cf <email>|<key>|<id>
     bot.command("add_cf", async (ctx) => {
         // if (!isAdmin(ctx)) return ctx.reply("⛔ Akses Ditolak."); // Allow for now or check admin
 
-        const args = ctx.match.split(" ");
+        const args = ctx.match.split("|").map(s => s.trim());
         if (args.length !== 3) {
-            return ctx.reply("❌ Format Salah!\nGunakan:\n`/add_cf <email> <api_key> <account_id>`", { parse_mode: "Markdown" });
+            return ctx.reply("❌ Format Salah!\nGunakan pemisah '|' (garis tegak).\n\nFormat:\n`/add_cf email|api_key|account_id`", { parse_mode: "Markdown" });
         }
 
         const [email, apiKey, accountId] = args;
@@ -177,6 +177,63 @@ export function setupHandlers(bot: Bot<MyContext>) {
         }
     });
 
+    // Command: /add_feeder email|key|id|channel|url
+    bot.command("add_feeder", async (ctx) => {
+        const args = ctx.match.split("|").map(s => s.trim());
+        if (args.length !== 5) {
+            return ctx.reply("❌ Format Salah!\nGunakan pemisah '|'.\n\nFormat:\n`/add_feeder email|key|id|channel_id|vercel_url`", { parse_mode: "Markdown" });
+        }
+
+        let [email, apiKey, accountId, channelId, vercelUrl] = args;
+
+        if (vercelUrl.endsWith('/')) vercelUrl = vercelUrl.slice(0, -1);
+        if (!vercelUrl.includes('/api/webhook')) vercelUrl += '/api/webhook';
+
+        await ctx.reply(`⏳ Setup Feeder Cloudflare...\nTarget Channel: ${channelId}`);
+
+        try {
+            const auth: any = { email, apiKey, accountId };
+            const workerName = "vless-monitor-feeder";
+            const secret = Math.random().toString(36).substring(7);
+
+            // 1. Upload Worker
+            const MONITOR_SCRIPT = `
+            export default {
+                async scheduled(event, env, ctx) {
+                    console.log("Cron Triggered");
+                    const botUrl = env.BOT_API_URL;
+                    const secret = env.BOT_SECRET;
+                    if (!botUrl) return;
+                    const url = \`\${botUrl}?action=check_proxies&secret=\${secret}\`;
+                    try { await fetch(url); } catch (e) { }
+                },
+                async fetch(request) {
+                    return new Response("Monitor Worker Active. Use Cron Trigger.");
+                }
+            };`;
+
+            await uploadWorker(auth, workerName, MONITOR_SCRIPT);
+
+            // 2. Set Env
+            await updateWorkerEnv(auth, workerName, {
+                BOT_API_URL: vercelUrl,
+                BOT_SECRET: secret
+            });
+
+            // 3. Set Cron
+            await updateWorkerCron(auth, workerName, ["*/5 * * * *"]);
+
+            // 4. Save Settings
+            await db.execute({ sql: "INSERT OR REPLACE INTO settings (key, value) VALUES ('monitor_channel_id', ?)", args: [channelId] });
+            await db.execute({ sql: "INSERT OR REPLACE INTO settings (key, value) VALUES ('monitor_secret', ?)", args: [secret] });
+
+            await ctx.reply("✅ Feeder Berhasil Di-setup!\nWorker akan memanggil bot setiap 5 menit.", { reply_markup: backToMainKeyboard });
+
+        } catch (err: any) {
+            await ctx.reply(`❌ Gagal Setup Feeder: ${err.message}`);
+        }
+    });
+
     bot.callbackQuery("action_admin_menu", async (ctx) => {
         if (!isAdmin(ctx)) return ctx.reply("⛔ Akses Ditolak.");
         await ctx.editMessageText("🛠 Admin Menu", { reply_markup: adminKeyboard });
@@ -193,24 +250,27 @@ export function setupHandlers(bot: Bot<MyContext>) {
     });
 
     bot.callbackQuery("admin_add_cf_account", async (ctx) => {
-        // await ctx.conversation.enter("addCfAccountConversation");
         // Use Command Instruction instead of Wizard
         await ctx.editMessageText(
-            "⚠️ **METODE BARU (Anti-Hang)**\n\n" +
-            "Karena keterbatasan server Vercel, mohon gunakan perintah manual berikut untuk menambah akun:\n\n" +
-            "`/add_cf <email> <api_key> <account_id>`\n\n" +
+            "⚠️ **ADD AKUN (METODE BARU)**\n\n" +
+            "Gunakan format pemisah tanda kurung `|` :\n\n" +
+            "`/add_cf email|api_key|account_id`\n\n" +
             "**Contoh:**\n" +
-            "`/add_cf budi@gmail.com 48f9c...0d a1b2...9c`\n\n" +
-            "1. Salin format diatas\n" +
-            "2. Ganti dengan data Cloudflare Anda\n" +
-            "3. Kirim ke bot",
+            "`/add_cf nama@email.com|48f...0d|a1b...9c`",
             { parse_mode: "Markdown", reply_markup: cfSettingsKeyboard }
         );
     });
 
     bot.callbackQuery("admin_cf_feeder", async (ctx) => {
-        if (!isAdmin(ctx)) return;
-        await ctx.conversation.enter("addFeederConversation");
+        // Use Command Instruction instead of Wizard
+        await ctx.editMessageText(
+            "⚠️ **SETUP FEEDER (METODE BARU)**\n\n" +
+            "Gunakan format pemisah `|` :\n\n" +
+            "`/add_feeder email|key|id|channel_id|vercel_url`\n\n" +
+            "**Contoh:**\n" +
+            "`/add_feeder budi@gm.com|xxKey|xxID|-100123|https://bot.vercel.app`",
+            { parse_mode: "Markdown", reply_markup: cfSettingsKeyboard }
+        );
     });
 
     // --- User Features ---
