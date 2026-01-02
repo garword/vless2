@@ -122,8 +122,9 @@ export function setupHandlers(bot: Bot<MyContext>) {
 
     // --- Admin Actions ---
     // Command: /add_cf <email>|<key>|<id>
+    // Command: /add_cf <email>|<key>|<id>
     bot.command("add_cf", async (ctx) => {
-        // if (!isAdmin(ctx)) return ctx.reply("⛔ Akses Ditolak."); // Allow for now or check admin
+        if (!isAdmin(ctx)) return ctx.reply("⛔ Akses Ditolak.");
 
         const args = ctx.match.split("|").map(s => s.trim());
         if (args.length !== 3) {
@@ -195,6 +196,8 @@ export function setupHandlers(bot: Bot<MyContext>) {
 
     // Command: /add_feeder email|key|id|channel|url
     bot.command("add_feeder", async (ctx) => {
+        if (!isAdmin(ctx)) return ctx.reply("⛔ Akses Ditolak.");
+
         const args = ctx.match.split("|").map(s => s.trim());
         if (args.length !== 5) {
             return ctx.reply("❌ Format Salah!\nGunakan pemisah '|'.\n\nFormat:\n`/add_feeder email|key|id|channel_id|vercel_url`", { parse_mode: "Markdown" });
