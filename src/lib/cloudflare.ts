@@ -42,7 +42,7 @@ export async function uploadWorker(auth: CFAuth, workerName: string, scriptConte
 
     const formData = new FormData();
     formData.append("metadata", JSON.stringify({ main_module: "index.js", compatibility_date: "2023-01-01" }));
-    formData.append("index.js", new Blob([scriptContent], { type: "application/javascript+module" }));
+    formData.append("index.js", new Blob([scriptContent], { type: "application/javascript+module" }), "index.js");
 
     // Need to use raw fetch for FormData to let browser/node handle boundary
     const headers: Record<string, string> = {};
