@@ -193,7 +193,19 @@ export function setupHandlers(bot: Bot<MyContext>) {
     });
 
     bot.callbackQuery("admin_add_cf_account", async (ctx) => {
-        await ctx.conversation.enter("addCfAccountConversation");
+        // await ctx.conversation.enter("addCfAccountConversation");
+        // Use Command Instruction instead of Wizard
+        await ctx.editMessageText(
+            "⚠️ **METODE BARU (Anti-Hang)**\n\n" +
+            "Karena keterbatasan server Vercel, mohon gunakan perintah manual berikut untuk menambah akun:\n\n" +
+            "`/add_cf <email> <api_key> <account_id>`\n\n" +
+            "**Contoh:**\n" +
+            "`/add_cf budi@gmail.com 48f9c...0d a1b2...9c`\n\n" +
+            "1. Salin format diatas\n" +
+            "2. Ganti dengan data Cloudflare Anda\n" +
+            "3. Kirim ke bot",
+            { parse_mode: "Markdown", reply_markup: cfSettingsKeyboard }
+        );
     });
 
     bot.callbackQuery("admin_cf_feeder", async (ctx) => {
