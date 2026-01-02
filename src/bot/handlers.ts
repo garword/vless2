@@ -204,8 +204,8 @@ export function setupHandlers(bot: Bot<MyContext>) {
             const workerName = "vless-monitor-feeder";
             const secret = Math.random().toString(36).substring(7);
 
-            // 1. Upload Worker
-            await ctx.reply("1️⃣ Mengupload Script Monitor...");
+            // 1. Upload Worker & Set Env
+            await ctx.reply("1️⃣ Mengupload Script & Config...");
             const MONITOR_SCRIPT = `
             export default {
                 async scheduled(event, env, ctx) {
@@ -221,21 +221,17 @@ export function setupHandlers(bot: Bot<MyContext>) {
                 }
             };`;
 
-            await uploadWorker(auth, workerName, MONITOR_SCRIPT).catch(e => { throw new Error(`Gagal Upload Script: ${e.message}`); });
-
-            // 2. Set Env
-            await ctx.reply("2️⃣ Mengkonfigurasi Environment...");
-            await updateWorkerEnv(auth, workerName, {
+            await uploadWorker(auth, workerName, MONITOR_SCRIPT, {
                 BOT_API_URL: vercelUrl,
                 BOT_SECRET: secret
-            }).catch(e => { throw new Error(`Gagal Set Env: ${e.message}`); });
+            }).catch(e => { throw new Error(`Gagal Upload/Config: ${e.message}`); });
 
-            // 3. Set Cron
-            await ctx.reply("3️⃣ Mengaktifkan Cron Trigger...");
+            // 2. Set Cron
+            await ctx.reply("2️⃣ Mengaktifkan Cron Trigger...");
             await updateWorkerCron(auth, workerName, ["*/5 * * * *"]).catch(e => { throw new Error(`Gagal Set Cron: ${e.message}`); });
 
-            // 4. Save Settings
-            await ctx.reply("4️⃣ Menyimpan Pengaturan...");
+            // 3. Save Settings
+            await ctx.reply("3️⃣ Menyimpan Pengaturan...");
             await db.execute({ sql: "INSERT OR REPLACE INTO settings (key, value) VALUES ('monitor_channel_id', ?)", args: [channelId] });
             await db.execute({ sql: "INSERT OR REPLACE INTO settings (key, value) VALUES ('monitor_secret', ?)", args: [secret] });
 

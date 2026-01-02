@@ -32,7 +32,7 @@ async function cfRequest(endpoint: string, method: string, auth: CFAuth, body?: 
     return data.result;
 }
 
-export async function uploadWorker(auth: CFAuth, workerName: string, scriptContent: string) {
+export async function uploadWorker(auth: CFAuth, workerName: string, scriptContent: string, envVars?: Record<string, string>) {
     // Upload config and script. For simple Module workers, we upload metadata + part.
     // Ease of use: use the standard script upload endpoint (PUT /accounts/:id/workers/scripts/:name)
     // Note: This requires the script to be valid JS/Module.
@@ -40,8 +40,17 @@ export async function uploadWorker(auth: CFAuth, workerName: string, scriptConte
     // We need to send it as a FormData or raw JS depending on type.
     // For simplicity, we assume standard ES Module worker.
 
+    const metadata: any = { main_module: "index.js", compatibility_date: "2023-01-01" };
+    if (envVars) {
+        metadata.bindings = Object.entries(envVars).map(([key, value]) => ({
+            type: "plain_text",
+            name: key,
+            text: value
+        }));
+    }
+
     const formData = new FormData();
-    formData.append("metadata", JSON.stringify({ main_module: "index.js", compatibility_date: "2023-01-01" }));
+    formData.append("metadata", JSON.stringify(metadata));
     formData.append("index.js", new Blob([scriptContent], { type: "application/javascript+module" }), "index.js");
 
     // Need to use raw fetch for FormData to let browser/node handle boundary
