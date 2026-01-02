@@ -353,8 +353,10 @@ export function setupHandlers(bot: Bot<MyContext>) {
             const check = await db.execute({ sql: "SELECT email FROM cf_accounts WHERE id=?", args: [id] });
             const email = check.rows[0]?.email || "Akun";
 
-            await db.execute({ sql: "DELETE FROM cf_accounts WHERE id=?", args: [id] });
+            // Delete Worker first (Child)
             await db.execute({ sql: "DELETE FROM workers WHERE account_id=?", args: [id] });
+            // Then Account (Parent)
+            await db.execute({ sql: "DELETE FROM cf_accounts WHERE id=?", args: [id] });
 
             await ctx.answerCallbackQuery(`✅ ${email} dihapus!`);
             await ctx.editMessageText(`✅ **BERHASIL!**\n\nAkun \`${email}\` telah dihapus dari database bot.\nWorker di Cloudflare tidak disentuh (aman).`, { parse_mode: "Markdown", reply_markup: cfSettingsKeyboard });
