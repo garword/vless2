@@ -228,7 +228,9 @@ export function setupHandlers(bot: Bot<MyContext>) {
 
             // 2. Set Cron
             await ctx.reply("2️⃣ Mengaktifkan Cron Trigger...");
-            await updateWorkerCron(auth, workerName, ["*/5 * * * *"]).catch(e => { throw new Error(`Gagal Set Cron: ${e.message}`); });
+            await updateWorkerCron(auth, workerName, ["*/5 * * * *"]).catch(async e => {
+                await ctx.reply(`⚠️ **PERINGATAN CRON:**\nGagal mengaktifkan jadwal otomatis.\nPenyebab: ${e.message}\n\n**Solusi:**\nLimit gratis Cloudflare hanya 5 cron. Hapus cron di worker lain, lalu set manual di dashboard CF.`);
+            });
 
             // 3. Save Settings
             await ctx.reply("3️⃣ Menyimpan Pengaturan...");
