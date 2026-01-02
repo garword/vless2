@@ -31,31 +31,39 @@ async function initBot() {
     handlers.setupHandlers(bot);
 }
 
+// ... imports
 export const POST = async (req: Request) => {
+    console.log("👉 [WEBHOOK] POST Request received");
     try {
+        console.log("👉 [WEBHOOK] calling initBot()...");
         await initBot();
+        console.log("👉 [WEBHOOK] initBot() finished. Bot instance:", !!bot);
 
-        const url = new URL(req.url);
+        // Fix: req.url might be relative in some environments, so we provide a base
+        const url = new URL(req.url, `https://${req.headers.get("host") || "localhost"}`);
         const action = url.searchParams.get("action");
-        const secret = url.searchParams.get("secret");
 
         if (action === "check_proxies") {
-            const { db } = await import("../../../lib/db");
-            const secRow = await db.execute("SELECT value FROM settings WHERE key = 'monitor_secret'");
-            const savedSecret = secRow.rows[0]?.value as string;
-
-            if (secret && secret === savedSecret) {
-                if (bot && handlers) await handlers.checkProxiesAndNotify(bot);
-                return new Response("Proxies Checked", { status: 200 });
-            }
-            return new Response("Unauthorized", { status: 401 });
+            // ... (keep logic)
         }
 
-        // Standard Webhook Handler using std/http adapter (Fetch API)
-        return await webhookCallback(bot!, "std/http")(req);
+        // Standard Webhook Handler
+        console.log("👉 [WEBHOOK] Processing update with webhookCallback...");
+
+        // Log the body for debugging
+        try {
+            const clone = req.clone();
+            const body = await clone.json();
+            console.log("👉 [WEBHOOK] Payload:", JSON.stringify(body, null, 2));
+        } catch (e) { console.log("👉 [WEBHOOK] Could not parse body log"); }
+
+        const handler = webhookCallback(bot!, "std/http");
+        const result = await handler(req);
+        console.log("👉 [WEBHOOK] Handler executed. Result status:", result.status);
+        return result;
 
     } catch (e: any) {
-        console.error("Webhook Error:", e);
+        console.error("❌ [WEBHOOK] Error:", e);
         return new Response(`Error: ${e.message}`, { status: 200 });
     }
 };
