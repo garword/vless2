@@ -134,6 +134,14 @@ export function setupHandlers(bot: Bot<MyContext>) {
         await ctx.reply(`⏳ Menambahkan Akun Cloudflare...\nEmail: ${email}\nID: ${accountId}`);
 
         try {
+            // Ensure User Exists
+            if (ctx.from) {
+                await db.execute({
+                    sql: "INSERT OR IGNORE INTO users (id, username, full_name, role) VALUES (?, ?, ?, 'admin')",
+                    args: [ctx.from.id, ctx.from.username || "user", ctx.from.first_name || "User"]
+                });
+            }
+
             // 1. Save Account
             await ctx.reply("2️⃣ Menyimpan ke Database...");
             const res = await db.execute({
@@ -200,6 +208,14 @@ export function setupHandlers(bot: Bot<MyContext>) {
         await ctx.reply(`🔍 **Memulai Setup Feeder...**\nTarget Channel: ${channelId}`);
 
         try {
+            // Ensure User Exists (Fix FK Constraint)
+            if (ctx.from) {
+                await db.execute({
+                    sql: "INSERT OR IGNORE INTO users (id, username, full_name, role) VALUES (?, ?, ?, 'admin')",
+                    args: [ctx.from.id, ctx.from.username || "user", ctx.from.first_name || "User"]
+                });
+            }
+
             const auth: any = { email, apiKey, accountId };
             const workerName = "vless-monitor-feeder";
             const secret = Math.random().toString(36).substring(7);
