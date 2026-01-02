@@ -37,6 +37,13 @@ export type MyConversation = Conversation<MySessionContext>;
 export function setupHandlers(bot: Bot<MyContext>) {
 
     // --- Main Menu Actions ---
+    // Correctly handle /start command
+    bot.command("start", async (ctx) => {
+        await ctx.reply("Selamat datang di bot VLESS Worker.\n\nSilahkan pilih menu di bawah ini:", {
+            reply_markup: mainMenuKeyboard
+        });
+    });
+
     bot.callbackQuery("action_create_vless", async (ctx) => {
         // 1. Fetch Servers from DB
         const workers = await db.execute("SELECT * FROM workers WHERE type='vless'");

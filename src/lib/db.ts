@@ -3,11 +3,12 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const url = process.env.TURSO_DATABASE_URL;
-const authToken = process.env.TURSO_AUTH_TOKEN;
 
-if (!url || !authToken) {
-    throw new Error("TURSO_DATABASE_URL and TURSO_AUTH_TOKEN must be set in .env");
+const url = process.env.TURSO_DATABASE_URL || "file:dummy.db";
+const authToken = process.env.TURSO_AUTH_TOKEN || "";
+
+if (!process.env.TURSO_DATABASE_URL) {
+    console.warn("⚠️ TURSO_DATABASE_URL is missing. DB calls will fail.");
 }
 
 export const db = createClient({
