@@ -641,7 +641,12 @@ export async function addFeederConversation(conversation: MyConversation, ctx: M
 export async function checkProxiesAndNotify(bot: Bot<MyContext>) {
     // 1. Get Channel ID
     const chReq = await db.execute("SELECT value FROM settings WHERE key = 'monitor_channel_id'");
-    const channelId = chReq.rows[0]?.value as string;
+    let channelId = chReq.rows[0]?.value as string;
+
+    // Fallback to Env
+    if (!channelId && process.env.CHANNEL_ID) {
+        channelId = process.env.CHANNEL_ID;
+    }
 
     if (!channelId) {
         console.log("No Monitor Channel ID set.");
