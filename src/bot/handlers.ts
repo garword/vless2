@@ -232,10 +232,16 @@ export function setupHandlers(bot: Bot<MyContext>) {
                 await ctx.reply(`⚠️ **PERINGATAN CRON:**\nGagal mengaktifkan jadwal otomatis.\nPenyebab: ${e.message}\n\n**Solusi:**\nLimit gratis Cloudflare hanya 5 cron. Hapus cron di worker lain, lalu set manual di dashboard CF.`);
             });
 
-            // 3. Save Settings
+            // 3. Save Settings & Account
             await ctx.reply("3️⃣ Menyimpan Pengaturan...");
             await db.execute({ sql: "INSERT OR REPLACE INTO settings (key, value) VALUES ('monitor_channel_id', ?)", args: [channelId] });
             await db.execute({ sql: "INSERT OR REPLACE INTO settings (key, value) VALUES ('monitor_secret', ?)", args: [secret] });
+
+            // Save Account for Management
+            await db.execute({
+                sql: "INSERT INTO cf_accounts (email, api_key, account_id, owner_id, type) VALUES (?, ?, ?, ?, 'feeder')",
+                args: [email, apiKey, accountId, ctx.from?.id || 0]
+            });
 
             await ctx.reply("✅ **SUKSES SETUP FEEDER!**\n\nRobot pemantau sudah aktif.\nIa akan mengecek status server setiap 5 menit.", { reply_markup: backToMainKeyboard });
 
@@ -271,7 +277,7 @@ export function setupHandlers(bot: Bot<MyContext>) {
         );
     });
 
-    bot.callbackQuery("admin_cf_feeder", async (ctx) => {
+    bot.callbackQuery("admin_add_feeder_guide", async (ctx) => {
         // Use Command Instruction instead of Wizard
         await ctx.editMessageText(
             "⚠️ **SETUP FEEDER (METODE BARU)**\n\n" +
@@ -281,6 +287,64 @@ export function setupHandlers(bot: Bot<MyContext>) {
             "`/add_feeder budi@gm.com|xxKey|xxID|-100123|https://bot.vercel.app`",
             { parse_mode: "Markdown", reply_markup: cfSettingsKeyboard }
         );
+    });
+
+    bot.callbackQuery("admin_list_cf_vpn", async (ctx) => {
+        if (!isAdmin(ctx)) return;
+        try {
+            const res = await db.execute("SELECT id, email, account_id FROM cf_accounts WHERE type='vpn' OR type IS NULL OR type='active'"); // Handle legacy defaults
+            if (res.rows.length === 0) return ctx.editMessageText("⚠️ Tidak ada akun VPN terdaftar.", { reply_markup: cfSettingsKeyboard });
+
+            let text = "🔐 **List Akun VPN:**\n\n";
+            const kb = new InlineKeyboard();
+            res.rows.forEach((row: any) => {
+                text += `• \`${row.email}\`\n  ID: ${row.account_id.substring(0, 4)}...\n\n`;
+                kb.text(`🗑 Hapus ${row.email}`, `delete_cf_account_${row.id}`).row();
+            });
+            kb.text("⬅️ Kembali", "admin_cf_settings");
+
+            await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: kb });
+        } catch (e: any) {
+            await ctx.reply(`Error: ${e.message}`);
+        }
+    });
+
+    bot.callbackQuery("admin_list_cf_feeder", async (ctx) => {
+        if (!isAdmin(ctx)) return;
+        try {
+            const res = await db.execute("SELECT id, email, account_id FROM cf_accounts WHERE type='feeder'");
+            if (res.rows.length === 0) return ctx.editMessageText("⚠️ Tidak ada akun Feeder terdaftar.", { reply_markup: cfSettingsKeyboard });
+
+            let text = "📡 **List Akun Feeder:**\n\n";
+            const kb = new InlineKeyboard();
+            res.rows.forEach((row: any) => {
+                text += `• \`${row.email}\`\n  ID: ${row.account_id.substring(0, 4)}...\n\n`;
+                kb.text(`🗑 Hapus ${row.email}`, `delete_cf_account_${row.id}`).row();
+            });
+            kb.text("⬅️ Kembali", "admin_cf_settings");
+
+            await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: kb });
+        } catch (e: any) {
+            await ctx.reply(`Error: ${e.message}`);
+        }
+    });
+
+    bot.callbackQuery(/delete_cf_account_(\d+)/, async (ctx) => {
+        if (!isAdmin(ctx)) return;
+        const id = ctx.match[1];
+        try {
+            // Get info before delete for confirmation msg
+            const check = await db.execute({ sql: "SELECT email FROM cf_accounts WHERE id=?", args: [id] });
+            const email = check.rows[0]?.email || "Akun";
+
+            await db.execute({ sql: "DELETE FROM cf_accounts WHERE id=?", args: [id] });
+            await db.execute({ sql: "DELETE FROM workers WHERE account_id=?", args: [id] });
+
+            await ctx.answerCallbackQuery(`✅ ${email} dihapus!`);
+            await ctx.editMessageText(`✅ **BERHASIL!**\n\nAkun \`${email}\` telah dihapus dari database bot.\nWorker di Cloudflare tidak disentuh (aman).`, { parse_mode: "Markdown", reply_markup: cfSettingsKeyboard });
+        } catch (e: any) {
+            await ctx.answerCallbackQuery(`❌ Gagal: ${e.message}`);
+        }
     });
 
     // --- User Features ---

@@ -25,9 +25,10 @@ export const adminKeyboard = new InlineKeyboard()
 
 // Sub-menu: CF Settings
 export const cfSettingsKeyboard = new InlineKeyboard()
-    .text("🔐 Akun CF VPN", "admin_list_cf_vpn").row()
-    .text("📡 Akun CF Feeder", "admin_cf_feeder").row()
-    .text("📥 Tambah Akun Baru", "admin_add_cf_account").row()
+    .text("🔐 List VPN", "admin_list_cf_vpn")
+    .text("📡 List Feeder", "admin_list_cf_feeder").row()
+    .text("➕ Tambah VPN", "admin_add_cf_account")
+    .text("➕ Setup Feeder", "admin_add_feeder_guide").row()
     .text("⬅️ Kembali", "action_admin_menu");
 
 // Sub Link Menu
