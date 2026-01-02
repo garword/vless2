@@ -1,7 +1,7 @@
 import { Bot, webhookCallback, session } from "grammy";
 import { conversations, createConversation } from "@grammyjs/conversations";
-import { setupHandlers, inputBugConversation, addCfAccountConversation, addProxyConversation, addFeederConversation, checkProxiesAndNotify, MyContext } from "@/bot/handlers";
-import { mainMenuKeyboard } from "@/bot/menus";
+import { setupHandlers, inputBugConversation, addCfAccountConversation, addProxyConversation, addFeederConversation, checkProxiesAndNotify, MyContext } from "../src/bot/handlers";
+import { mainMenuKeyboard } from "../src/bot/menus";
 import * as dotenv from "dotenv";
 
 dotenv.config();
@@ -39,7 +39,7 @@ export default async (req: Request) => {
     // We'll trust the db connection is ready since it's lazy loaded in handlers/db.
 
     if (action === "check_proxies") {
-        const { db } = await import("@/lib/db"); // Import inside to ensure init
+        const { db } = await import("../src/lib/db"); // Import inside to ensure init
         const secRow = await db.execute("SELECT value FROM settings WHERE key = 'monitor_secret'");
         const savedSecret = secRow.rows[0]?.value as string;
 

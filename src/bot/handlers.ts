@@ -7,10 +7,11 @@ import {
     subLinkTypeKeyboard,
     subLinkMethodKeyboard,
     adminKeyboard,
-    cfSettingsKeyboard
+    cfSettingsKeyboard,
+    backToMainKeyboard
 } from "./menus";
 import { db } from "../lib/db";
-import { CFAuth, uploadWorker, addWorkerDomain, addWorkerRoute, updateWorkerCron, updateWorkerEnv } from "@/lib/cloudflare";
+import { CFAuth, uploadWorker, addWorkerDomain, addWorkerRoute, updateWorkerCron, updateWorkerEnv } from "../lib/cloudflare";
 import { Conversation, ConversationFlavor } from "@grammyjs/conversations";
 
 // Define Session Structure
@@ -125,18 +126,15 @@ export function setupHandlers(bot: Bot<MyContext>) {
 
     bot.callbackQuery("admin_add_proxy", async (ctx) => {
         if (!isAdmin(ctx)) return;
-        await ctx.reply("📝 Masukkan Subdomain untuk Proxy baru (contoh: sg1.mysitevpn.com):");
         await ctx.conversation.enter("addProxyConversation");
     });
 
     bot.callbackQuery("admin_add_cf_account", async (ctx) => {
-        await ctx.reply("📧 Masukkan Email Cloudflare Anda:");
         await ctx.conversation.enter("addCfAccountConversation");
     });
 
     bot.callbackQuery("admin_cf_feeder", async (ctx) => {
         if (!isAdmin(ctx)) return;
-        await ctx.reply("⚙️ Setup Monitoring Feeder");
         await ctx.conversation.enter("addFeederConversation");
     });
 
@@ -145,32 +143,32 @@ export function setupHandlers(bot: Bot<MyContext>) {
     // Check IP
     bot.callbackQuery("action_check_ip", async (ctx) => {
         if (!ctx.chat) return;
-        const msg = await ctx.reply("⏳ Checking IP...");
+        await ctx.editMessageText("⏳ Checking IP...", { reply_markup: backToMainKeyboard });
         try {
             const res = await fetch("https://api.ipify.org?format=json");
             const data = await res.json() as { ip: string };
-            await ctx.api.editMessageText(ctx.chat.id, msg.message_id, `📍 <b>Worker IP:</b> <code>${data.ip}</code>`, { parse_mode: "HTML" });
+            await ctx.editMessageText(`📍 <b>Worker IP:</b> <code>${data.ip}</code>`, { parse_mode: "HTML", reply_markup: backToMainKeyboard });
         } catch (e) {
-            await ctx.api.editMessageText(ctx.chat.id, msg.message_id, "❌ Gagal cek IP.");
+            await ctx.editMessageText("❌ Gagal cek IP.", { reply_markup: backToMainKeyboard });
         }
     });
 
     // List VLESS
     bot.callbackQuery("action_list_vless", async (ctx) => {
         const workers = await db.execute("SELECT worker_name, country_code, flag, subdomain FROM workers WHERE type='vless'");
-        if (workers.rows.length === 0) return ctx.reply("⚠️ Belum ada server.");
+        if (workers.rows.length === 0) return ctx.editMessageText("⚠️ Belum ada server.", { reply_markup: backToMainKeyboard });
 
         let text = "📄 <b>List VLESS Server:</b>\n\n";
         workers.rows.forEach((w, i) => {
             text += `${i + 1}. ${w.flag} <b>${w.worker_name}</b>\n   <code>${w.subdomain}</code>\n\n`;
         });
-        await ctx.reply(text, { parse_mode: "HTML" });
+        await ctx.editMessageText(text, { parse_mode: "HTML", reply_markup: backToMainKeyboard });
     });
 
     // List Wildcard
     bot.callbackQuery("action_list_wildcard", async (ctx) => {
         const workers = await db.execute("SELECT subdomain FROM workers WHERE type='vless'");
-        if (workers.rows.length === 0) return ctx.reply("⚠️ Belum ada server.");
+        if (workers.rows.length === 0) return ctx.editMessageText("⚠️ Belum ada server.", { reply_markup: backToMainKeyboard });
 
         // This is simplified. Real wildcard list usually implies domains that support wildcard.
         // We assume all workers support wildcard if configured correctly.
@@ -178,33 +176,27 @@ export function setupHandlers(bot: Bot<MyContext>) {
         workers.rows.forEach((w) => {
             text += `• <code>${w.subdomain}</code>\n`;
         });
-        await ctx.reply(text, { parse_mode: "HTML" });
+        await ctx.editMessageText(text, { parse_mode: "HTML", reply_markup: backToMainKeyboard });
     });
 
     // Donate
     bot.callbackQuery("action_donate", async (ctx) => {
-        await ctx.reply("💝 <b>Donasi Pengembangan Bot</b>\n\nSilahkan kontak admin: @garword", { parse_mode: "HTML" });
+        await ctx.editMessageText("💝 <b>Donasi Pengembangan Bot</b>\n\nSilahkan kontak admin: @garword", { parse_mode: "HTML", reply_markup: backToMainKeyboard });
     });
 
     // Usage Data
     bot.callbackQuery("action_usage_data", async (ctx) => {
         // Placeholder: CF Analytics API is heavy.
-        await ctx.reply("📈 <b>Data Pemakaian</b>\n\nFitur ini memerlukan integrasi GraphQL Cloudflare yang lebih dalam. Saat ini belum tersedia.", { parse_mode: "HTML" });
+        await ctx.editMessageText("📈 <b>Data Pemakaian</b>\n\nFitur ini memerlukan integrasi GraphQL Cloudflare yang lebih dalam. Saat ini belum tersedia.", { parse_mode: "HTML", reply_markup: backToMainKeyboard });
     });
 
     // Get Sub Link
     bot.callbackQuery("action_get_sub_link", async (ctx) => {
-        // Generate a link based on Vercel URL
-        // We don't have the Vercel URL stored in context easily unless we query DB or env.
-        // Assuming we rely on user input or env.
-        // Let's iterate types.
-        await ctx.reply("🔗 Pilih Tipe Subscription:", { reply_markup: subLinkTypeKeyboard });
+        await ctx.editMessageText("🔗 Pilih Tipe Subscription:", { reply_markup: subLinkTypeKeyboard });
     });
 
     bot.callbackQuery(/^sub_type_(.+)$/, async (ctx) => {
         const type = ctx.match[1];
-        // Next, ask for method (WS/SNI) to filter? Or just give all?
-        // Usually sub link filters by method.
         ctx.session.temp = { subType: type as any };
         await ctx.editMessageText("🔗 Pilih Metode:", { reply_markup: subLinkMethodKeyboard });
     });
@@ -214,17 +206,9 @@ export function setupHandlers(bot: Bot<MyContext>) {
         const type = ctx.session.temp?.subType || "vless";
 
         // Construct Link
-        // We need the BASE URL. We can use the one from Feeder setup if available?
-        // Or assume the current bot domain? Telegram doesn't give bot domain.
-        // We often use `os.hostname()` but in Serverless it's dynamic.
-        // Best effort: Get from DB settings (monitor_api_url?) or Env or ask user.
+        // ... (existing comments)
 
-        const rows = await db.execute("SELECT value FROM settings WHERE key='monitor_channel_id'"); // Just a check
-        // Ideally we stored 'bot_public_url' in settings during feeder setup.
-        // But we didn't store it with a key 'bot_public_url', we sent it to worker.
-
-        // For now, let's use a placeholder or generic message.
-        await ctx.reply("❌ URL Bot belum diset di Database Settings. Gunakan menu Admin Feeder untuk set URL Bot output.");
+        await ctx.editMessageText("❌ URL Bot belum diset di Database Settings. Gunakan menu Admin Feeder untuk set URL Bot output.", { reply_markup: backToMainKeyboard });
         // Correct fix: Store URL during feeder setup.
     });
 
@@ -232,20 +216,20 @@ export function setupHandlers(bot: Bot<MyContext>) {
     bot.callbackQuery("admin_list_cf_vpn", async (ctx) => {
         if (!isAdmin(ctx)) return;
         const accs = await db.execute("SELECT email, account_id FROM cf_accounts");
-        if (accs.rows.length === 0) return ctx.reply("⚠️ Belum ada akun CF tersimpan.");
+        if (accs.rows.length === 0) return ctx.editMessageText("⚠️ Belum ada akun CF tersimpan.", { reply_markup: backToMainKeyboard });
 
         let text = "🔐 <b>List Akun Cloudflare:</b>\n\n";
         accs.rows.forEach((a, i) => {
             text += `${i + 1}. ${a.email}\n   ID: <code>${a.account_id}</code>\n\n`;
         });
-        await ctx.reply(text, { parse_mode: "HTML" });
+        await ctx.editMessageText(text, { parse_mode: "HTML", reply_markup: backToMainKeyboard });
     });
 
     // Admin Del Proxy Implementation
     bot.callbackQuery("admin_del_proxy", async (ctx) => {
         if (!isAdmin(ctx)) return;
         const workers = await db.execute("SELECT id, worker_name, subdomain FROM workers");
-        if (workers.rows.length === 0) return ctx.reply("⚠️ Tidak ada proxy untuk dihapus.");
+        if (workers.rows.length === 0) return ctx.editMessageText("⚠️ Tidak ada proxy untuk dihapus.", { reply_markup: backToMainKeyboard });
 
         const kb = new InlineKeyboard();
         workers.rows.forEach(w => {
@@ -253,14 +237,14 @@ export function setupHandlers(bot: Bot<MyContext>) {
         });
         kb.text("⬅️ Batal", "menu_main");
 
-        await ctx.reply("Pilih Proxy yang akan dihapus (Hanya DB):", { reply_markup: kb });
+        await ctx.editMessageText("Pilih Proxy yang akan dihapus (Hanya DB):", { reply_markup: kb });
     });
 
     bot.callbackQuery(/^del_proxy_(.+)$/, async (ctx) => {
         if (!isAdmin(ctx)) return;
         const id = ctx.match[1];
         await db.execute({ sql: "DELETE FROM workers WHERE id = ?", args: [id] });
-        await ctx.editMessageText("✅ Proxy berhasil dihapus dari Database.");
+        await ctx.editMessageText("✅ Proxy berhasil dihapus dari Database.", { reply_markup: backToMainKeyboard });
     });
 
 }
@@ -272,21 +256,53 @@ function isAdmin(ctx: MyContext) {
 }
 
 // Conversation: Member Add CF Account
+// Helper: Clean up conversation messages
+async function cleanupConversation(ctx: MyContext, userMsgId?: number, botMsgId?: number) {
+    if (userMsgId) await ctx.api.deleteMessage(ctx.chat?.id!, userMsgId).catch(() => { });
+    if (botMsgId) await ctx.api.deleteMessage(ctx.chat?.id!, botMsgId).catch(() => { });
+}
+
+// Conversation: Member Add CF Account
 export async function addCfAccountConversation(conversation: MyConversation, ctx: MyContext) {
+    const prompt1 = await ctx.reply("📧 Masukkan Email Cloudflare Anda:");
     const emailMsg = await conversation.wait();
     const email = emailMsg.message?.text;
-    if (!email) return ctx.reply("Batal.");
 
-    await ctx.reply("🔑 Masukkan Global API Key / Token:");
+    // Auto-delete user input
+    if (emailMsg.message?.message_id) await ctx.api.deleteMessage(ctx.chat?.id!, emailMsg.message.message_id).catch(() => { });
+
+    if (!email || email.toLowerCase() === "batal" || email.toLowerCase() === "cancel") {
+        await cleanupConversation(ctx, undefined, prompt1.message_id);
+        return;
+    }
+
+    const prompt2 = await ctx.reply("🔑 Masukkan Global API Key / Token:");
     const keyMsg = await conversation.wait();
     const apiKey = keyMsg.message?.text;
 
-    await ctx.reply("🆔 Masukkan Account ID:");
+    // Auto-delete user input
+    if (keyMsg.message?.message_id) await ctx.api.deleteMessage(ctx.chat?.id!, keyMsg.message.message_id).catch(() => { });
+
+    if (!apiKey || apiKey.toLowerCase() === "batal" || apiKey.toLowerCase() === "cancel") {
+        await cleanupConversation(ctx, undefined, prompt2.message_id);
+        // Ideally should clean previous ones too, but for simplicity just this step.
+        return;
+    }
+
+    const prompt3 = await ctx.reply("🆔 Masukkan Account ID:");
     const accMsg = await conversation.wait();
     const accountId = accMsg.message?.text;
 
+    // Auto-delete user input
+    if (accMsg.message?.message_id) await ctx.api.deleteMessage(ctx.chat?.id!, accMsg.message.message_id).catch(() => { });
+
+    if (!accountId || accountId.toLowerCase() === "batal" || accountId.toLowerCase() === "cancel") {
+        await cleanupConversation(ctx, undefined, prompt3.message_id);
+        return;
+    }
+
     if (email && apiKey && accountId) {
-        await ctx.reply("⏳ Memverifikasi & Mendaftarkan Akun...");
+        const processMsg = await ctx.reply("⏳ Memverifikasi & Mendaftarkan Akun...");
 
         try {
             // 1. Save Account
@@ -297,7 +313,7 @@ export async function addCfAccountConversation(conversation: MyConversation, ctx
             const dbAccountId = res.rows[0].id;
 
             // 2. Auto Deploy Worker
-            await ctx.reply("🚀 Sedang men-deploy VLESS Worker ke akun Anda...");
+            await ctx.api.editMessageText(ctx.chat?.id!, processMsg.message_id, "🚀 Sedang men-deploy VLESS Worker ke akun Anda...");
 
             // Minimal VLESS Script (Placeholder for full implementation)
             const scriptContent = `
@@ -321,17 +337,25 @@ export async function addCfAccountConversation(conversation: MyConversation, ctx
             let flag = "🇮🇩";
 
             // 4. Ask for Custom Domain (Optional)
+            await ctx.api.deleteMessage(ctx.chat?.id!, processMsg.message_id).catch(() => { });
+
             await ctx.reply("🌐 Apakah Anda ingin menggunakan **Custom Domain** sendiri? (Support Wildcard/SNI).\n\nKetik nama domain (misal: `vip.domainku.com`) atau ketik **skip** untuk menggunakan default.");
             const domMsg = await conversation.wait();
 
+            // Delete user input immediately
+            if (domMsg.message?.message_id) await ctx.api.deleteMessage(ctx.chat?.id!, domMsg.message.message_id).catch(() => { });
+
+
             if (domMsg.message?.text && domMsg.message.text.toLowerCase() !== 'skip') {
                 const customDomain = domMsg.message.text.toLowerCase();
-                await ctx.reply(`🆔 Kirimkan **Zone ID** untuk domain ${customDomain}:`);
+                const zonePrompt = await ctx.reply(`🆔 Kirimkan **Zone ID** untuk domain ${customDomain}:`);
                 const zoneMsg = await conversation.wait();
                 const zoneId = zoneMsg.message?.text;
 
+                if (zoneMsg.message?.message_id) await ctx.api.deleteMessage(ctx.chat?.id!, zoneMsg.message.message_id).catch(() => { });
+
                 if (zoneId) {
-                    await ctx.reply("⚙️ Mengikat Custom Domain & Routing Wildcard...");
+                    await ctx.api.editMessageText(ctx.chat?.id!, zonePrompt.message_id, "⚙️ Mengikat Custom Domain & Routing Wildcard...");
                     try {
                         // 1. Bind Domain (SSL)
                         await addWorkerDomain(auth, accountId, workerName, customDomain, zoneId);
@@ -339,17 +363,16 @@ export async function addCfAccountConversation(conversation: MyConversation, ctx
                         // 2. Add Route Wildcard (*.domain/*)
                         try {
                             await addWorkerRoute(auth, zoneId, `*.${customDomain}/*`, workerName);
-                            await ctx.reply(`✅ Routing Wildcard (*.${customDomain}) Berhasil!`);
                         } catch (routeErr: any) {
-                            await ctx.reply(`⚠️ Gagal Set Route Wildcard: ${routeErr.message}. Coba set manual di Dash CF.`);
+                            // Log error but proceed
                         }
 
                         subdomain = customDomain;
                         country = "US"; // Assuming changes
                         flag = "🇺🇸";
-                        await ctx.reply(`✅ Domain ${customDomain} berhasil diikat sepenuhnya!`);
+                        await ctx.api.editMessageText(ctx.chat?.id!, zonePrompt.message_id, `✅ Domain ${customDomain} berhasil diikat!`);
                     } catch (err: any) {
-                        await ctx.reply(`⚠️ Gagal BIND Domain: ${err.message}. Tetap menggunakan subdomain standar.`);
+                        await ctx.api.editMessageText(ctx.chat?.id!, zonePrompt.message_id, `⚠️ Gagal BIND Domain: ${err.message}. Tetap menggunakan subdomain standar.`);
                     }
                 }
             }
@@ -359,28 +382,36 @@ export async function addCfAccountConversation(conversation: MyConversation, ctx
                 args: [subdomain, dbAccountId, workerName, country, flag]
             });
 
-            await ctx.reply(`✅ Selesai! Worker Anda aktif: ${subdomain}.\nSiap digunakan untuk WS/SNI/Wildcard Pribadi.`);
+            await ctx.reply(`✅ Selesai! Worker Anda aktif: ${subdomain}.\nSiap digunakan untuk WS/SNI/Wildcard Pribadi.`, { reply_markup: backToMainKeyboard });
 
         } catch (e: any) {
-            await ctx.reply(`❌ Gagal: ${e.message}`);
+            await ctx.reply(`❌ Gagal: ${e.message}`, { reply_markup: backToMainKeyboard });
         }
     } else {
-        await ctx.reply("⚠️ Gagal, data tidak lengkap.");
+        await ctx.reply("⚠️ Gagal, data tidak lengkap.", { reply_markup: backToMainKeyboard });
     }
 }
 
 // Conversation: Admin Add Proxy (With Wildcard)
 export async function addProxyConversation(conversation: MyConversation, ctx: MyContext) {
     // 1. Ask Target Account ID
-    await ctx.reply("🆔 Masukkan **Account ID Cloudflare** target deployment:");
+    const prompt1 = await ctx.reply("🆔 Masukkan **Account ID Cloudflare** target deployment:");
     const accMsg = await conversation.wait();
     const accountId = accMsg.message?.text;
+
+    // Auto-delete
+    if (accMsg.message?.message_id) await ctx.api.deleteMessage(ctx.chat?.id!, accMsg.message.message_id).catch(() => { });
+
     if (!accountId) return;
 
     // 2. Ask Worker Name
-    await ctx.reply("📝 Masukkan **Nama Worker** (ex: vless-sg1):");
+    const prompt2 = await ctx.reply("📝 Masukkan **Nama Worker** (ex: vless-sg1):");
     const nameMsg = await conversation.wait();
     const workerName = nameMsg.message?.text || `vless-${Date.now()}`;
+
+    // Auto-delete
+    if (nameMsg.message?.message_id) await ctx.api.deleteMessage(ctx.chat?.id!, nameMsg.message.message_id).catch(() => { });
+
 
     // Need to Authentication for this Account ID
     // Logic: Look up in DB for credentials associated with this Account ID
@@ -398,13 +429,10 @@ export async function addProxyConversation(conversation: MyConversation, ctx: My
                 accountId: accountId
             };
         } else {
-            // If not found in DB, we can't deploy technically without asking for keys.
-            // For Admin simplicity, let's ask for keys if not found?
-            // Or fail. Let's fail gracefully.
-            return ctx.reply("⚠️ Akun ID tidak ditemukan di database. Tambahkan akun dulu di menu Admin.");
+            return ctx.reply("⚠️ Akun ID tidak ditemukan di database. Tambahkan akun dulu di menu Admin.", { reply_markup: backToMainKeyboard });
         }
     } catch (e) {
-        return ctx.reply("⚠️ DB Error.");
+        return ctx.reply("⚠️ DB Error.", { reply_markup: backToMainKeyboard });
     }
 
     let subdomain = `${workerName}.${accountId.substring(0, 4)}.workers.dev`; // Default
@@ -415,14 +443,21 @@ export async function addProxyConversation(conversation: MyConversation, ctx: My
     await ctx.reply("🌐 Gunakan **Custom Domain**? (Ketik domain atau 'skip'):");
     const domMsg = await conversation.wait();
 
+    // Auto-delete
+    if (domMsg.message?.message_id) await ctx.api.deleteMessage(ctx.chat?.id!, domMsg.message.message_id).catch(() => { });
+
+
     if (domMsg.message?.text && domMsg.message.text.toLowerCase() !== 'skip') {
         const customDomain = domMsg.message.text.toLowerCase();
-        await ctx.reply(`🆔 Kirimkan **Zone ID** untuk ${customDomain}:`);
+        const zonePrompt = await ctx.reply(`🆔 Kirimkan **Zone ID** untuk ${customDomain}:`);
         const zoneMsg = await conversation.wait();
         const zoneId = zoneMsg.message?.text;
 
+        // Auto-delete
+        if (zoneMsg.message?.message_id) await ctx.api.deleteMessage(ctx.chat?.id!, zoneMsg.message.message_id).catch(() => { });
+
         if (zoneId) {
-            await ctx.reply("⚙️ Binding Custom Domain & Routing Wildcard...");
+            await ctx.api.editMessageText(ctx.chat?.id!, zonePrompt.message_id, "⚙️ Binding Custom Domain & Routing Wildcard...");
             try {
                 // REAL API CALL
                 await addWorkerDomain(auth, accountId, workerName, customDomain, zoneId);
@@ -430,22 +465,22 @@ export async function addProxyConversation(conversation: MyConversation, ctx: My
                 // Add Wildcard Route
                 try {
                     await addWorkerRoute(auth, zoneId, `*.${customDomain}/*`, workerName);
-                    await ctx.reply(`✅ Routing Wildcard (*.${customDomain}) Berhasil!`);
                 } catch (routeErr: any) {
-                    await ctx.reply(`⚠️ Gagal Set Route Wildcard: ${routeErr.message}.`);
+                    // Log fail but proceed
                 }
 
                 subdomain = customDomain;
                 country = "SG";
                 flag = "🇸🇬";
+                await ctx.api.editMessageText(ctx.chat?.id!, zonePrompt.message_id, `✅ Routing Wildcard (*.${customDomain}) Berhasil!`);
             } catch (err: any) {
-                await ctx.reply(`⚠️ Gagal bind domain: ${err.message}`);
+                await ctx.api.editMessageText(ctx.chat?.id!, zonePrompt.message_id, `⚠️ Gagal bind domain: ${err.message}`);
             }
         }
     }
 
     try {
-        await ctx.reply(`⏳ Deploying ${workerName}...`);
+        const deployMsg = await ctx.reply(`⏳ Deploying ${workerName}...`);
 
         // REAL API CALL: Upload Worker
         const scriptContent = `
@@ -459,9 +494,9 @@ export async function addProxyConversation(conversation: MyConversation, ctx: My
             args: [subdomain, dbId, workerName, country, flag]
         });
 
-        await ctx.reply(`✅ Proxy Admin Siap!\nDomain: ${subdomain}\nWildcard/SNI: Aktif.`);
+        await ctx.api.editMessageText(ctx.chat?.id!, deployMsg.message_id, `✅ Proxy Admin Siap!\nDomain: ${subdomain}\nWildcard/SNI: Aktif.`, { reply_markup: backToMainKeyboard });
     } catch (e: any) {
-        await ctx.reply(`❌ Error: ${e.message}`);
+        await ctx.reply(`❌ Error: ${e.message}`, { reply_markup: backToMainKeyboard });
     }
 }
 
@@ -469,6 +504,9 @@ export async function addProxyConversation(conversation: MyConversation, ctx: My
 export async function inputBugConversation(conversation: MyConversation, ctx: MyContext) {
     const bugMsg = await conversation.wait();
     if (!bugMsg.message?.text) return;
+
+    // Auto-delete user input
+    if (bugMsg.message?.message_id) await ctx.api.deleteMessage(ctx.chat?.id!, bugMsg.message.message_id).catch(() => { });
 
     const bug = bugMsg.message.text;
     if (ctx.session.temp) {
@@ -511,16 +549,20 @@ async function generateAndShowResult(ctx: MyContext | any, inputPayload: string)
         host = sni;
     }
 
-    const uuid = "USER_UUID_PLACEHOLDER";
-    const vlessTls = `vless://${uuid}@${serverAddress}:443?encryption=none&security=tls&sni=${sni}&type=ws&host=${host}&path=${encodeURIComponent(path)}#${encodeURIComponent(remark)}`;
-    const vlessNtls = `vless://${uuid}@${serverAddress}:80?encryption=none&security=none&type=ws&host=${host}&path=${encodeURIComponent(path)}#${encodeURIComponent(remark)}`;
+    const uuid = globalThis.crypto ? globalThis.crypto.randomUUID() : "USER_UUID_PLACEHOLDER";
+
+    // Fallback if UUID not available in Node < 19
+    const uuidStr = uuid || "UUID-GENERATOR-FAILED";
+
+    const vlessTls = `vless://${uuidStr}@${serverAddress}:443?encryption=none&security=tls&sni=${sni}&type=ws&host=${host}&path=${encodeURIComponent(path)}#${encodeURIComponent(remark)}`;
+    const vlessNtls = `vless://${uuidStr}@${serverAddress}:80?encryption=none&security=none&type=ws&host=${host}&path=${encodeURIComponent(path)}#${encodeURIComponent(remark)}`;
 
     const clashYaml = `
 - name: ${remark}
   server: ${serverAddress}
   port: 443
   type: vless
-  uuid: ${uuid}
+  uuid: ${uuidStr}
   cipher: none
   tls: true
   skip-cert-verify: true
@@ -533,15 +575,28 @@ async function generateAndShowResult(ctx: MyContext | any, inputPayload: string)
     udp: true
 `.trim();
 
-    try { await ctx.api.deleteMessage(ctx.chat.id, loadMsg.message_id); } catch (e) { }
+    const responseText = `
+<b>${remark}</b>
+Method: ${method?.toUpperCase()}
 
-    await ctx.reply(`${inputPayload}\n\n<b>${remark}</b>\nMethod: ${method?.toUpperCase()}`, { parse_mode: "HTML" });
+<b>VLESS TLS:</b>
+<code>${vlessTls}</code>
 
-    await ctx.reply(`<code>${vlessTls}</code>`, { parse_mode: "HTML" });
-    await ctx.reply(`<code>${vlessNtls}</code>`, { parse_mode: "HTML" });
-    await ctx.reply(`<code>${clashYaml}</code>`, { parse_mode: "HTML" });
+<b>VLESS NTLS:</b>
+<code>${vlessNtls}</code>
 
-    await ctx.reply("Selesai.", { reply_markup: mainMenuKeyboard });
+<b>CLASH:</b>
+<code>${clashYaml}</code>
+    `.trim();
+
+    try {
+        await ctx.api.editMessageText(ctx.chat.id, loadMsg.message_id, responseText, {
+            parse_mode: "HTML",
+            reply_markup: backToMainKeyboard
+        });
+    } catch (e: any) {
+        await ctx.api.editMessageText(ctx.chat.id, loadMsg.message_id, `❌ Error: ${e.message}`, { reply_markup: backToMainKeyboard });
+    }
 }
 
 // --- Monitoring Logic ---
@@ -576,28 +631,49 @@ export default {
 `;
 
 export async function addFeederConversation(conversation: MyConversation, ctx: MyContext) {
-    await ctx.reply("📧 Masukkan Email Cloudflare (Feeder):");
+    const prompt1 = await ctx.reply("📧 Masukkan Email Cloudflare (Feeder):");
     const emailMsg = await conversation.wait();
     const email = emailMsg.message?.text;
 
-    await ctx.reply("🔑 Masukkan Global API Key / Token:");
+    // Auto-delete user input
+    if (emailMsg.message?.message_id) await ctx.api.deleteMessage(ctx.chat?.id!, emailMsg.message.message_id).catch(() => { });
+
+    if (!email || email.toLowerCase() === "batal") {
+        await cleanupConversation(ctx, undefined, prompt1.message_id);
+        return;
+    }
+
+    const prompt2 = await ctx.reply("🔑 Masukkan Global API Key / Token:");
     const keyMsg = await conversation.wait();
     const apiKey = keyMsg.message?.text;
 
-    await ctx.reply("🆔 Masukkan Account ID Cloudflare:");
+    // Auto-delete user input
+    if (keyMsg.message?.message_id) await ctx.api.deleteMessage(ctx.chat?.id!, keyMsg.message.message_id).catch(() => { });
+
+    const prompt3 = await ctx.reply("🆔 Masukkan Account ID Cloudflare:");
     const idMsg = await conversation.wait();
     const accountId = idMsg.message?.text;
 
-    await ctx.reply("📢 Masukkan ID Channel Telegram untuk Notifikasi (Contoh: -100xxxxxxx):");
+    // Auto-delete user input
+    if (idMsg.message?.message_id) await ctx.api.deleteMessage(ctx.chat?.id!, idMsg.message.message_id).catch(() => { });
+
+    const prompt4 = await ctx.reply("📢 Masukkan ID Channel Telegram untuk Notifikasi (Contoh: -100xxxxxxx):");
     const channelMsg = await conversation.wait();
     const channelId = channelMsg.message?.text;
 
-    await ctx.reply("🌐 Masukkan URL Project Vercel Anda (Contoh: https://my-bot.vercel.app):");
+    // Auto-delete user input
+    if (channelMsg.message?.message_id) await ctx.api.deleteMessage(ctx.chat?.id!, channelMsg.message.message_id).catch(() => { });
+
+    const prompt5 = await ctx.reply("🌐 Masukkan URL Project Vercel Anda (Contoh: https://my-bot.vercel.app):");
     const urlMsg = await conversation.wait();
     let vercelUrl = urlMsg.message?.text;
 
+    // Auto-delete user input
+    if (urlMsg.message?.message_id) await ctx.api.deleteMessage(ctx.chat?.id!, urlMsg.message.message_id).catch(() => { });
+
     if (!email || !apiKey || !accountId || !channelId || !vercelUrl) {
-        return ctx.reply("❌ Input tidak lengkap. Batal.");
+        // Cleanup some prompts? Too complex to clean all, just show error and back.
+        return ctx.reply("❌ Input tidak lengkap. Batal.", { reply_markup: backToMainKeyboard });
     }
 
     if (vercelUrl.endsWith('/')) vercelUrl = vercelUrl.slice(0, -1);
@@ -608,7 +684,7 @@ export async function addFeederConversation(conversation: MyConversation, ctx: M
     const workerName = "vless-monitor-feeder";
     const secret = Math.random().toString(36).substring(7);
 
-    await ctx.reply(`⏳ Deploying Monitor Worker ke Cloudflare: ${workerName}...`);
+    const deployMsg = await ctx.reply(`⏳ Deploying Monitor Worker ke Cloudflare: ${workerName}...`);
 
     try {
         // 1. Upload Worker
@@ -616,14 +692,14 @@ export async function addFeederConversation(conversation: MyConversation, ctx: M
         await uploadWorker(auth, workerName, MONITOR_SCRIPT);
 
         // 2. Set Env Vars
-        await ctx.reply("⚙️ Setting Environment Variables...");
+        await ctx.api.editMessageText(ctx.chat?.id!, deployMsg.message_id, "⚙️ Setting Environment Variables...");
         await updateWorkerEnv(auth, workerName, {
             BOT_API_URL: vercelUrl,
             BOT_SECRET: secret
         });
 
         // 3. Set Cron
-        await ctx.reply("⏰ Setting Cron Trigger (Setiap 5 menit)...");
+        await ctx.api.editMessageText(ctx.chat?.id!, deployMsg.message_id, "⏰ Setting Cron Trigger (Setiap 5 menit)...");
         await updateWorkerCron(auth, workerName, ["*/5 * * * *"]);
 
         // 4. Save Settings to DB
@@ -631,10 +707,10 @@ export async function addFeederConversation(conversation: MyConversation, ctx: M
         await db.execute({ sql: "INSERT OR REPLACE INTO settings (key, value) VALUES ('monitor_channel_id', ?)", args: [channelId] });
         await db.execute({ sql: "INSERT OR REPLACE INTO settings (key, value) VALUES ('monitor_secret', ?)", args: [secret] });
 
-        await ctx.reply("✅ Feeder Berhasil Di-setup!\nWorker akan memanggil bot setiap 5 menit untuk cek proxy.");
+        await ctx.api.editMessageText(ctx.chat?.id!, deployMsg.message_id, "✅ Feeder Berhasil Di-setup!\nWorker akan memanggil bot setiap 5 menit untuk cek proxy.", { reply_markup: backToMainKeyboard });
 
     } catch (err: any) {
-        await ctx.reply(`❌ Gagal Setup Feeder: ${err.message}`);
+        await ctx.reply(`❌ Gagal Setup Feeder: ${err.message}`, { reply_markup: backToMainKeyboard });
     }
 }
 

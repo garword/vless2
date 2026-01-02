@@ -58,3 +58,5 @@ export function generateWildcardListKeyboard(subdomains: string[]) {
     kb.text("⬅️ Kembali", "menu_main");
     return kb;
 }
+
+export const backToMainKeyboard = new InlineKeyboard().text("⬅️ Kembali", "menu_main");
