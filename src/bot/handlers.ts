@@ -175,10 +175,7 @@ export function setupHandlers(bot: Bot<MyContext>) {
             let country = "ID";
             let flag = "🇮🇩";
 
-            await db.execute({
-                sql: "INSERT INTO workers (subdomain, account_id, worker_name, type, country_code, flag) VALUES (?, ?, ?, 'vless', ?, ?)",
-                args: [subdomain, dbAccountId, workerName, country, flag]
-            });
+
 
             // 3. Save Worker
             await ctx.reply("4️⃣ Menyimpan Worker ke Database...");
