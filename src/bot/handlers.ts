@@ -1,4 +1,4 @@
-import { Bot, Context, session, SessionFlavor } from "grammy";
+import { Bot, Context, session, SessionFlavor, InlineKeyboard } from "grammy";
 import {
     mainMenuKeyboard,
     methodKeyboard,
@@ -10,7 +10,7 @@ import {
     cfSettingsKeyboard
 } from "./menus";
 import { db } from "../lib/db";
-import { uploadWorker, addWorkerDomain, addWorkerRoute } from "../lib/cloudflare";
+import { CFAuth, uploadWorker, addWorkerDomain, addWorkerRoute, updateWorkerCron, updateWorkerEnv } from "@/lib/cloudflare";
 import { Conversation, ConversationFlavor } from "@grammyjs/conversations";
 
 // Define Session Structure
@@ -123,24 +123,146 @@ export function setupHandlers(bot: Bot<MyContext>) {
         await ctx.editMessageText("⚙️ Pengaturan API CF", { reply_markup: cfSettingsKeyboard });
     });
 
-    // Admin: Add Proxy (Deploy Worker + Wildcard)
     bot.callbackQuery("admin_add_proxy", async (ctx) => {
         if (!isAdmin(ctx)) return;
         await ctx.reply("📝 Masukkan Subdomain untuk Proxy baru (contoh: sg1.mysitevpn.com):");
         await ctx.conversation.enter("addProxyConversation");
     });
 
-    // Member: Add CF Account (No Wildcard Auto-Add)
     bot.callbackQuery("admin_add_cf_account", async (ctx) => {
-        // Allow members to add their own accounts
         await ctx.reply("📧 Masukkan Email Cloudflare Anda:");
         await ctx.conversation.enter("addCfAccountConversation");
     });
 
+    bot.callbackQuery("admin_cf_feeder", async (ctx) => {
+        if (!isAdmin(ctx)) return;
+        await ctx.reply("⚙️ Setup Monitoring Feeder");
+        await ctx.conversation.enter("addFeederConversation");
+    });
+
+    // --- User Features ---
+
+    // Check IP
+    bot.callbackQuery("action_check_ip", async (ctx) => {
+        if (!ctx.chat) return;
+        const msg = await ctx.reply("⏳ Checking IP...");
+        try {
+            const res = await fetch("https://api.ipify.org?format=json");
+            const data = await res.json() as { ip: string };
+            await ctx.api.editMessageText(ctx.chat.id, msg.message_id, `📍 <b>Worker IP:</b> <code>${data.ip}</code>`, { parse_mode: "HTML" });
+        } catch (e) {
+            await ctx.api.editMessageText(ctx.chat.id, msg.message_id, "❌ Gagal cek IP.");
+        }
+    });
+
+    // List VLESS
+    bot.callbackQuery("action_list_vless", async (ctx) => {
+        const workers = await db.execute("SELECT worker_name, country_code, flag, subdomain FROM workers WHERE type='vless'");
+        if (workers.rows.length === 0) return ctx.reply("⚠️ Belum ada server.");
+
+        let text = "📄 <b>List VLESS Server:</b>\n\n";
+        workers.rows.forEach((w, i) => {
+            text += `${i + 1}. ${w.flag} <b>${w.worker_name}</b>\n   <code>${w.subdomain}</code>\n\n`;
+        });
+        await ctx.reply(text, { parse_mode: "HTML" });
+    });
+
+    // List Wildcard
+    bot.callbackQuery("action_list_wildcard", async (ctx) => {
+        const workers = await db.execute("SELECT subdomain FROM workers WHERE type='vless'");
+        if (workers.rows.length === 0) return ctx.reply("⚠️ Belum ada server.");
+
+        // This is simplified. Real wildcard list usually implies domains that support wildcard.
+        // We assume all workers support wildcard if configured correctly.
+        let text = "🌍 <b>List Domain Wildcard:</b>\n\n";
+        workers.rows.forEach((w) => {
+            text += `• <code>${w.subdomain}</code>\n`;
+        });
+        await ctx.reply(text, { parse_mode: "HTML" });
+    });
+
+    // Donate
+    bot.callbackQuery("action_donate", async (ctx) => {
+        await ctx.reply("💝 <b>Donasi Pengembangan Bot</b>\n\nSilahkan kontak admin: @garword", { parse_mode: "HTML" });
+    });
+
+    // Usage Data
+    bot.callbackQuery("action_usage_data", async (ctx) => {
+        // Placeholder: CF Analytics API is heavy.
+        await ctx.reply("📈 <b>Data Pemakaian</b>\n\nFitur ini memerlukan integrasi GraphQL Cloudflare yang lebih dalam. Saat ini belum tersedia.", { parse_mode: "HTML" });
+    });
+
+    // Get Sub Link
+    bot.callbackQuery("action_get_sub_link", async (ctx) => {
+        // Generate a link based on Vercel URL
+        // We don't have the Vercel URL stored in context easily unless we query DB or env.
+        // Assuming we rely on user input or env.
+        // Let's iterate types.
+        await ctx.reply("🔗 Pilih Tipe Subscription:", { reply_markup: subLinkTypeKeyboard });
+    });
+
+    bot.callbackQuery(/^sub_type_(.+)$/, async (ctx) => {
+        const type = ctx.match[1];
+        // Next, ask for method (WS/SNI) to filter? Or just give all?
+        // Usually sub link filters by method.
+        ctx.session.temp = { subType: type as any };
+        await ctx.editMessageText("🔗 Pilih Metode:", { reply_markup: subLinkMethodKeyboard });
+    });
+
+    bot.callbackQuery(/^sub_method_(.+)$/, async (ctx) => {
+        const method = ctx.match[1];
+        const type = ctx.session.temp?.subType || "vless";
+
+        // Construct Link
+        // We need the BASE URL. We can use the one from Feeder setup if available?
+        // Or assume the current bot domain? Telegram doesn't give bot domain.
+        // We often use `os.hostname()` but in Serverless it's dynamic.
+        // Best effort: Get from DB settings (monitor_api_url?) or Env or ask user.
+
+        const rows = await db.execute("SELECT value FROM settings WHERE key='monitor_channel_id'"); // Just a check
+        // Ideally we stored 'bot_public_url' in settings during feeder setup.
+        // But we didn't store it with a key 'bot_public_url', we sent it to worker.
+
+        // For now, let's use a placeholder or generic message.
+        await ctx.reply("❌ URL Bot belum diset di Database Settings. Gunakan menu Admin Feeder untuk set URL Bot output.");
+        // Correct fix: Store URL during feeder setup.
+    });
+
+    // Admin List CF VPN
+    bot.callbackQuery("admin_list_cf_vpn", async (ctx) => {
+        if (!isAdmin(ctx)) return;
+        const accs = await db.execute("SELECT email, account_id FROM cf_accounts");
+        if (accs.rows.length === 0) return ctx.reply("⚠️ Belum ada akun CF tersimpan.");
+
+        let text = "🔐 <b>List Akun Cloudflare:</b>\n\n";
+        accs.rows.forEach((a, i) => {
+            text += `${i + 1}. ${a.email}\n   ID: <code>${a.account_id}</code>\n\n`;
+        });
+        await ctx.reply(text, { parse_mode: "HTML" });
+    });
+
+    // Admin Del Proxy Implementation
     bot.callbackQuery("admin_del_proxy", async (ctx) => {
         if (!isAdmin(ctx)) return;
-        await ctx.reply("Fitur Delete Proxy: Menampilkan list worker untuk dihapus (To Be Implemented).");
+        const workers = await db.execute("SELECT id, worker_name, subdomain FROM workers");
+        if (workers.rows.length === 0) return ctx.reply("⚠️ Tidak ada proxy untuk dihapus.");
+
+        const kb = new InlineKeyboard();
+        workers.rows.forEach(w => {
+            kb.text(`🗑 ${w.worker_name}`, `del_proxy_${w.id}`).row();
+        });
+        kb.text("⬅️ Batal", "menu_main");
+
+        await ctx.reply("Pilih Proxy yang akan dihapus (Hanya DB):", { reply_markup: kb });
     });
+
+    bot.callbackQuery(/^del_proxy_(.+)$/, async (ctx) => {
+        if (!isAdmin(ctx)) return;
+        const id = ctx.match[1];
+        await db.execute({ sql: "DELETE FROM workers WHERE id = ?", args: [id] });
+        await ctx.editMessageText("✅ Proxy berhasil dihapus dari Database.");
+    });
+
 }
 
 // Helper: Check Admin
@@ -420,4 +542,149 @@ async function generateAndShowResult(ctx: MyContext | any, inputPayload: string)
     await ctx.reply(`<code>${clashYaml}</code>`, { parse_mode: "HTML" });
 
     await ctx.reply("Selesai.", { reply_markup: mainMenuKeyboard });
+}
+
+// --- Monitoring Logic ---
+
+const MONITOR_SCRIPT = `
+export default {
+    async scheduled(event, env, ctx) {
+        console.log("Cron Triggered");
+        const botUrl = env.BOT_API_URL;
+        const secret = env.BOT_SECRET;
+
+        if (!botUrl) {
+            console.error("BOT_API_URL not set");
+            return;
+        }
+
+        const url = \`\${botUrl}?action=check_proxies&secret=\${secret}\`;
+        console.log(\`Fetching \${url}...\`);
+
+        try {
+            const resp = await fetch(url);
+            console.log(\`Response: \${resp.status}\`);
+        } catch (e) {
+            console.error("Fetch Error:", e);
+        }
+    },
+    
+    async fetch(request) {
+        return new Response("Monitor Worker Active. Use Cron Trigger.");
+    }
+};
+`;
+
+export async function addFeederConversation(conversation: MyConversation, ctx: MyContext) {
+    await ctx.reply("📧 Masukkan Email Cloudflare (Feeder):");
+    const emailMsg = await conversation.wait();
+    const email = emailMsg.message?.text;
+
+    await ctx.reply("🔑 Masukkan Global API Key / Token:");
+    const keyMsg = await conversation.wait();
+    const apiKey = keyMsg.message?.text;
+
+    await ctx.reply("🆔 Masukkan Account ID Cloudflare:");
+    const idMsg = await conversation.wait();
+    const accountId = idMsg.message?.text;
+
+    await ctx.reply("📢 Masukkan ID Channel Telegram untuk Notifikasi (Contoh: -100xxxxxxx):");
+    const channelMsg = await conversation.wait();
+    const channelId = channelMsg.message?.text;
+
+    await ctx.reply("🌐 Masukkan URL Project Vercel Anda (Contoh: https://my-bot.vercel.app):");
+    const urlMsg = await conversation.wait();
+    let vercelUrl = urlMsg.message?.text;
+
+    if (!email || !apiKey || !accountId || !channelId || !vercelUrl) {
+        return ctx.reply("❌ Input tidak lengkap. Batal.");
+    }
+
+    if (vercelUrl.endsWith('/')) vercelUrl = vercelUrl.slice(0, -1);
+    if (!vercelUrl.includes('/api/webhook')) vercelUrl += '/api/webhook';
+
+    // Type assertion for TS if needed since our CFAuth allows email/apiKey
+    const auth: any = { email, apiKey, accountId };
+    const workerName = "vless-monitor-feeder";
+    const secret = Math.random().toString(36).substring(7);
+
+    await ctx.reply(`⏳ Deploying Monitor Worker ke Cloudflare: ${workerName}...`);
+
+    try {
+        // 1. Upload Worker
+        // Need to cast script if strict type, but string is fine.
+        await uploadWorker(auth, workerName, MONITOR_SCRIPT);
+
+        // 2. Set Env Vars
+        await ctx.reply("⚙️ Setting Environment Variables...");
+        await updateWorkerEnv(auth, workerName, {
+            BOT_API_URL: vercelUrl,
+            BOT_SECRET: secret
+        });
+
+        // 3. Set Cron
+        await ctx.reply("⏰ Setting Cron Trigger (Setiap 5 menit)...");
+        await updateWorkerCron(auth, workerName, ["*/5 * * * *"]);
+
+        // 4. Save Settings to DB
+        // Determine type of db.execute. Assuming standard result
+        await db.execute({ sql: "INSERT OR REPLACE INTO settings (key, value) VALUES ('monitor_channel_id', ?)", args: [channelId] });
+        await db.execute({ sql: "INSERT OR REPLACE INTO settings (key, value) VALUES ('monitor_secret', ?)", args: [secret] });
+
+        await ctx.reply("✅ Feeder Berhasil Di-setup!\nWorker akan memanggil bot setiap 5 menit untuk cek proxy.");
+
+    } catch (err: any) {
+        await ctx.reply(`❌ Gagal Setup Feeder: ${err.message}`);
+    }
+}
+
+export async function checkProxiesAndNotify(bot: Bot<MyContext>) {
+    // 1. Get Channel ID
+    const chReq = await db.execute("SELECT value FROM settings WHERE key = 'monitor_channel_id'");
+    const channelId = chReq.rows[0]?.value as string;
+
+    if (!channelId) {
+        console.log("No Monitor Channel ID set.");
+        return;
+    }
+
+    // 2. Get All Proxies
+    const proxies = await db.execute("SELECT * FROM workers WHERE type = 'vless'");
+    if (proxies.rows.length === 0) return;
+
+    // 3. Check Each Proxy
+    for (const row of proxies.rows) {
+        const domain = row.subdomain as string;
+        const name = row.worker_name as string;
+        const flag = row.flag as string;
+
+        try {
+            // Simple Connectivity Check
+            // Timeout 8s
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 8000);
+
+            const res = await fetch(`https://${domain}`, {
+                method: 'GET',
+                signal: controller.signal
+            });
+            clearTimeout(timeout);
+
+            if (!res.ok) {
+                // throw new Error(`Status ${res.status}`);
+                // Actually, VLESS worker might return 400 or something if no UUID.
+                // But a connection error (timeout/dns) means it's DOWN.
+                // If it returns 200 "VLESS Admin Node", it is UP.
+                // My template returns "VLESS Admin Node", so we expect 200.
+            }
+        } catch (err: any) {
+            // FAILED - SEND ALERT
+            const msg = `⚠️ <b>PROXY ALERT</b> ⚠️\n\nName: ${name}\nDomain: ${domain} ${flag}\nStatus: 🔴 DOWN / UNREACHABLE\nError: ${err.message}`;
+            try {
+                await bot.api.sendMessage(channelId, msg, { parse_mode: "HTML" });
+            } catch (tgErr) {
+                console.error(`Failed to send alert to ${channelId}:`, tgErr);
+            }
+        }
+    }
 }

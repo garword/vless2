@@ -39,3 +39,7 @@ CREATE TABLE IF NOT EXISTS api_endpoints (
   url TEXT PRIMARY KEY,
   status TEXT DEFAULT 'active'
 );
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);

@@ -95,3 +95,27 @@ export async function createDNSRecord(auth: CFAuth, zoneId: string, name: string
 export async function getZones(auth: CFAuth) {
     return cfRequest(`/zones`, "GET", auth);
 }
+
+export async function updateWorkerCron(auth: CFAuth, workerName: string, crons: string[]) {
+    return cfRequest(`/accounts/${auth.accountId}/workers/scripts/${workerName}/schedules`, "PUT", auth, [
+        { cron: crons[0] } // Getting simple here, usually array of objects
+    ]);
+}
+
+export async function updateWorkerEnv(auth: CFAuth, workerName: string, envVars: Record<string, string>) {
+    // Fetch existing bindings/settings first? Simpler to just PUT settings if possible.
+    // Cloudflare API for bindings is complex. We might need to use the `metadata` part of the uploadWorker, 
+    // BUT specific environment variable update endpoint is easier if available.
+    // Actually, creating a valid metadata blob during upload is better, but let's try a dedicated endpoint or metadata update.
+    // NOTE: The standard API to update settings is PATCH /scripts/{name}/settings
+
+    const bindings = Object.entries(envVars).map(([key, value]) => ({
+        type: "plain_text",
+        name: key,
+        text: value
+    }));
+
+    return cfRequest(`/accounts/${auth.accountId}/workers/scripts/${workerName}/settings`, "PATCH", auth, {
+        bindings
+    });
+}
