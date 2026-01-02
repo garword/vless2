@@ -1,6 +1,8 @@
+export const dynamic = 'force-dynamic';
 import { Bot, webhookCallback, session } from "grammy";
 import { conversations, createConversation } from "@grammyjs/conversations";
-// Dynamic imports handles the rest
+// import { db } from "../../../lib/db"; 
+// Using dynamic import for db below to avoid build-time execution
 import * as dotenv from "dotenv";
 
 dotenv.config();
@@ -11,7 +13,10 @@ let handlers: any = null;
 async function initBot() {
     if (bot) return;
 
-    if (!process.env.BOT_TOKEN) throw new Error("BOT_TOKEN is unset");
+    if (!process.env.BOT_TOKEN) {
+        console.warn("⚠️ BOT_TOKEN is unset. Bot cannot start.");
+        return;
+    }
 
     // Dynamic import to avoid top-level load crashes
     // Relative path: src/app/api/webhook/route.ts -> src/bot/handlers
@@ -35,7 +40,6 @@ async function initBot() {
     handlers.setupHandlers(bot);
 }
 
-// ... imports
 export const POST = async (req: Request) => {
     console.log("👉 [WEBHOOK] POST Request received");
     try {
@@ -48,7 +52,23 @@ export const POST = async (req: Request) => {
         const action = url.searchParams.get("action");
 
         if (action === "check_proxies") {
-            // ... (keep logic)
+            const secret = url.searchParams.get("secret") || "";
+            console.log("👉 [WEBHOOK] Action check_proxies. Secret:", secret);
+
+            // Dynamic import DB to avoid build-time execution
+            // @ts-ignore
+            const { db } = await import("../../../lib/db");
+            const dbSecret = await db.execute("SELECT value FROM settings WHERE key='monitor_secret'");
+            const storedSecret = dbSecret.rows[0]?.value;
+
+            if (storedSecret && secret === storedSecret) {
+                console.log("✅ Secret verified. Running checkProxiesAndNotify...");
+                await handlers.checkProxiesAndNotify(bot);
+                return new Response("Checked", { status: 200 });
+            } else {
+                console.log("❌ Invalid Secret");
+                return new Response("Unauthorized", { status: 401 });
+            }
         }
 
         // Standard Webhook Handler
@@ -61,7 +81,11 @@ export const POST = async (req: Request) => {
             console.log("👉 [WEBHOOK] Payload:", JSON.stringify(body, null, 2));
         } catch (e) { console.log("👉 [WEBHOOK] Could not parse body log"); }
 
-        const handler = webhookCallback(bot!, "std/http");
+        if (!bot) {
+            return new Response("Bot not initialized", { status: 500 });
+        }
+
+        const handler = webhookCallback(bot, "std/http");
         const result = await handler(req);
         console.log("👉 [WEBHOOK] Handler executed. Result status:", result.status);
         return result;
