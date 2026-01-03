@@ -8,7 +8,7 @@ async function setWebhook() {
         process.exit(1);
     }
 
-    const webhookUrl = "https://vless2.vercel.app/api/webhook";
+    const webhookUrl = "https://vless2-p1ta.vercel.app/api/webhook";
     const apiUrl = `https://api.telegram.org/bot${token}/setWebhook?url=${webhookUrl}`;
 
     console.log(`🔗 Setting webhook to: ${webhookUrl}`);

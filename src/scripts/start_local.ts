@@ -1,42 +1,56 @@
-
 import { Bot, session } from "grammy";
 import { conversations, createConversation } from "@grammyjs/conversations";
-import { setupHandlers, inputBugConversation, addCfAccountConversation, addProxyConversation, addFeederConversation, MyContext } from "../bot/handlers";
-import { mainMenuKeyboard } from "../bot/menus";
 import * as dotenv from "dotenv";
-import * as path from "path";
+import { setupHandlers, inputBugConversation, addCfAccountConversation, addProxyConversation, addFeederConversation, MyContext } from "../bot/handlers";
+import { db } from "../lib/db";
 
-// Load .env
-dotenv.config({ path: path.resolve(__dirname, "../../.env") });
+dotenv.config();
 
-if (!process.env.BOT_TOKEN) {
-    throw new Error("BOT_TOKEN is unset in .env");
+async function run() {
+    console.log("🔧 Initializing Local Bot...");
+
+    if (!process.env.BOT_TOKEN) {
+        console.error("❌ Error: BOT_TOKEN is missing in .env");
+        process.exit(1);
+    }
+
+    // Check DB Connection
+    try {
+        await db.execute("SELECT 1");
+        console.log("✅ Database Connected");
+    } catch (e: any) {
+        console.error("❌ Database Connection Failed:", e.message);
+        console.warn("⚠️ Pastikan credentials Turso di .env benar.");
+    }
+
+    const bot = new Bot<MyContext>(process.env.BOT_TOKEN);
+
+    // Session & Conversations
+    // Initialize session with 'temp' object as required by SessionData definition in handlers.ts
+    bot.use(session({ initial: () => ({ temp: {} }) }));
+    bot.use(conversations());
+
+    // Register Conversations
+    bot.use(createConversation(inputBugConversation));
+    bot.use(createConversation(addCfAccountConversation));
+    bot.use(createConversation(addProxyConversation));
+    bot.use(createConversation(addFeederConversation));
+
+    // Setup Main Handlers
+    setupHandlers(bot);
+
+    // Delete Webhook to switch to Polling
+    console.log("🟡 Deleting Webhook (Disconnecting from Vercel)...");
+    await bot.api.deleteWebhook();
+    console.log("✅ Webhook deleted.");
+
+    // Start Polling
+    console.log("🚀 Bot is running locally! (Press Ctrl+C to stop)");
+    await bot.start({
+        onStart: (botInfo) => {
+            console.log(`✅ Logged in as @${botInfo.username}`);
+        }
+    });
 }
 
-const bot = new Bot<MyContext>(process.env.BOT_TOKEN);
-
-// Middleware
-bot.use(session({ initial: () => ({}) }));
-bot.use(conversations());
-bot.use(createConversation(inputBugConversation as any));
-bot.use(createConversation(addCfAccountConversation as any));
-bot.use(createConversation(addProxyConversation as any));
-bot.use(createConversation(addFeederConversation as any));
-
-// Setup Handlers
-setupHandlers(bot);
-
-// Fallback Start Command (if not in handlers, but it usually is)
-bot.command("start", (ctx) => {
-    ctx.reply("Selamat datang di bot VLESS Worker (Local).\n\nSilahkan pilih menu di bawah ini:", {
-        reply_markup: mainMenuKeyboard
-    });
-});
-
-console.log("🚀 Bot is running locally...");
-
-bot.catch((err) => {
-    console.error("⚠️ Global Error Caught:", err);
-});
-
-bot.start();
+run().catch(console.error);

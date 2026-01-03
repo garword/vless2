@@ -11,8 +11,10 @@ import {
     backToMainKeyboard
 } from "./menus";
 import { db } from "../lib/db";
-import { CFAuth, uploadWorker, addWorkerDomain, addWorkerRoute, updateWorkerCron, updateWorkerEnv } from "../lib/cloudflare";
+import { CFAuth, uploadWorker, addWorkerDomain, addWorkerRoute, updateWorkerCron, updateWorkerEnv, getZones } from "../lib/cloudflare";
 import { Conversation, ConversationFlavor } from "@grammyjs/conversations";
+import * as fs from "fs/promises";
+import * as path from "path";
 
 // Define Session Structure
 export interface SessionData {
@@ -490,240 +492,153 @@ async function cleanupConversation(ctx: MyContext, userMsgId?: number, botMsgId?
 }
 
 // Conversation: Member Add CF Account
+// Conversation: Member Add CF Account (Interactive)
 export async function addCfAccountConversation(conversation: MyConversation, ctx: MyContext) {
-    const prompt1 = await ctx.reply("📧 Masukkan Email Cloudflare Anda:");
+    await ctx.reply("📧 Masukkan **Email Cloudflare**:");
     const emailMsg = await conversation.wait();
-    const email = emailMsg.message?.text;
+    const email = (emailMsg.message?.text || "").trim();
 
     // Auto-delete user input
     if (emailMsg.message?.message_id) await ctx.api.deleteMessage(ctx.chat?.id!, emailMsg.message.message_id).catch(() => { });
 
-    if (!email || email.toLowerCase() === "batal" || email.toLowerCase() === "cancel") {
-        await cleanupConversation(ctx, undefined, prompt1.message_id);
-        return;
-    }
+    if (!email || email.length < 5 || email.toLowerCase() === "batal") return ctx.reply("❌ Email tidak valid / Batal.");
 
-    const prompt2 = await ctx.reply("🔑 Masukkan Global API Key / Token:");
+    await ctx.reply("🔑 Masukkan **Global API Key / Token**:");
     const keyMsg = await conversation.wait();
-    const apiKey = keyMsg.message?.text;
+    const apiKey = (keyMsg.message?.text || "").trim();
 
     // Auto-delete user input
     if (keyMsg.message?.message_id) await ctx.api.deleteMessage(ctx.chat?.id!, keyMsg.message.message_id).catch(() => { });
 
-    if (!apiKey || apiKey.toLowerCase() === "batal" || apiKey.toLowerCase() === "cancel") {
-        await cleanupConversation(ctx, undefined, prompt2.message_id);
-        // Ideally should clean previous ones too, but for simplicity just this step.
-        return;
-    }
+    if (!apiKey || apiKey.length < 10) return ctx.reply("❌ API Key tidak valid.");
 
-    const prompt3 = await ctx.reply("🆔 Masukkan Account ID:");
-    const accMsg = await conversation.wait();
-    const accountId = accMsg.message?.text;
+    await ctx.reply("🆔 Masukkan **Account ID Cloudflare**:");
+    const idMsg = await conversation.wait();
+    const accountId = (idMsg.message?.text || "").trim();
 
     // Auto-delete user input
-    if (accMsg.message?.message_id) await ctx.api.deleteMessage(ctx.chat?.id!, accMsg.message.message_id).catch(() => { });
+    if (idMsg.message?.message_id) await ctx.api.deleteMessage(ctx.chat?.id!, idMsg.message.message_id).catch(() => { });
 
-    if (!accountId || accountId.toLowerCase() === "batal" || accountId.toLowerCase() === "cancel") {
-        await cleanupConversation(ctx, undefined, prompt3.message_id);
-        return;
+    if (!accountId) return ctx.reply("❌ Account ID tidak valid.");
+
+    // Verify Auth
+    await ctx.reply("🔄 Verifikasi Akun & Mengambil Zone...");
+    const auth = { email, apiKey, accountId };
+    let zones: any[] = [];
+
+    try {
+        const res = await conversation.external(() => getZones(auth));
+        zones = res;
+        await ctx.reply(`✅ Terhubung! Ditemukan ${zones.length} domain (Zones).`);
+    } catch (e: any) {
+        return ctx.reply(`❌ Gagal Terhubung: ${e.message}. Cek Email/Key/ID.`);
     }
 
-    if (email && apiKey && accountId) {
-        const processMsg = await ctx.reply("⏳ Memverifikasi & Mendaftarkan Akun...");
+    // Name Worker
+    await ctx.reply("📝 Masukkan **Nama Worker** (ex: vless-sg1):");
+    const nameMsg = await conversation.wait();
+    const workerName = (nameMsg.message?.text || `vless-${Date.now()}`).trim();
 
-        try {
-            // 1. Save Account
-            const res = await db.execute({
-                sql: "INSERT INTO cf_accounts (email, api_key, account_id, owner_id) VALUES (?, ?, ?, ?) RETURNING id",
-                args: [email, apiKey, accountId, ctx.from?.id || 0]
-            });
-            const dbAccountId = res.rows[0].id;
+    if (nameMsg.message?.message_id) await ctx.api.deleteMessage(ctx.chat?.id!, nameMsg.message.message_id).catch(() => { });
 
-            // 2. Auto Deploy Worker
-            await ctx.api.editMessageText(ctx.chat?.id!, processMsg.message_id, "🚀 Sedang men-deploy VLESS Worker ke akun Anda...");
+    // Custom Domain
+    await ctx.reply("🌐 Gunakan **Custom Domain**? (Ketik domain lengkap, misal `sub.domainku.com`, atau ketik `skip`):");
+    const domMsg = await conversation.wait();
+    const customDomainInput = (domMsg.message?.text || 'skip').trim().toLowerCase();
 
-            // Minimal VLESS Script (Placeholder for full implementation)
-            const scriptContent = `
-            import { connect } from "cloudflare:sockets";
-            export default {
-              async fetch(request, env, ctx) {
-                 const upgrade = request.headers.get("Upgrade");
-                 if(upgrade === "websocket") return new Response(null, { status: 101 });
-                 return new Response("VLESS Active", { status: 200 });
-              }
-            };`;
+    if (domMsg.message?.message_id) await ctx.api.deleteMessage(ctx.chat?.id!, domMsg.message.message_id).catch(() => { });
 
-            const workerName = `vless-${ctx.from?.id}-${Math.floor(Math.random() * 1000)}`;
-            const auth = { email, apiKey, accountId };
+    let subdomain = `${workerName}.${accountId.substring(0, 4)}.workers.dev`;
+    let zoneId = "";
 
-            // Real CF API Call
-            await uploadWorker(auth, workerName, scriptContent);
-
-            let subdomain = `${workerName}.${accountId.substring(0, 4)}.workers.dev`; // Default
-            let country = "ID";
-            let flag = "🇮🇩";
-
-            // 4. Ask for Custom Domain (Optional)
-            await ctx.api.deleteMessage(ctx.chat?.id!, processMsg.message_id).catch(() => { });
-
-            await ctx.reply("🌐 Apakah Anda ingin menggunakan **Custom Domain** sendiri? (Support Wildcard/SNI).\n\nKetik nama domain (misal: `vip.domainku.com`) atau ketik **skip** untuk menggunakan default.");
-            const domMsg = await conversation.wait();
-
-            // Delete user input immediately
-            if (domMsg.message?.message_id) await ctx.api.deleteMessage(ctx.chat?.id!, domMsg.message.message_id).catch(() => { });
-
-
-            if (domMsg.message?.text && domMsg.message.text.toLowerCase() !== 'skip') {
-                const customDomain = domMsg.message.text.toLowerCase();
-                const zonePrompt = await ctx.reply(`🆔 Kirimkan **Zone ID** untuk domain ${customDomain}:`);
-                const zoneMsg = await conversation.wait();
-                const zoneId = zoneMsg.message?.text;
-
-                if (zoneMsg.message?.message_id) await ctx.api.deleteMessage(ctx.chat?.id!, zoneMsg.message.message_id).catch(() => { });
-
-                if (zoneId) {
-                    await ctx.api.editMessageText(ctx.chat?.id!, zonePrompt.message_id, "⚙️ Mengikat Custom Domain & Routing Wildcard...");
-                    try {
-                        // 1. Bind Domain (SSL)
-                        await addWorkerDomain(auth, accountId, workerName, customDomain, zoneId);
-
-                        // 2. Add Route Wildcard (*.domain/*)
-                        try {
-                            await addWorkerRoute(auth, zoneId, `*.${customDomain}/*`, workerName);
-                        } catch (routeErr: any) {
-                            // Log error but proceed
-                        }
-
-                        subdomain = customDomain;
-                        country = "US"; // Assuming changes
-                        flag = "🇺🇸";
-                        await ctx.api.editMessageText(ctx.chat?.id!, zonePrompt.message_id, `✅ Domain ${customDomain} berhasil diikat!`);
-                    } catch (err: any) {
-                        await ctx.api.editMessageText(ctx.chat?.id!, zonePrompt.message_id, `⚠️ Gagal BIND Domain: ${err.message}. Tetap menggunakan subdomain standar.`);
-                    }
-                }
-            }
-
-            await db.execute({
-                sql: "INSERT INTO workers (subdomain, account_id, worker_name, type, country_code, flag) VALUES (?, ?, ?, 'vless', ?, ?)",
-                args: [subdomain, dbAccountId, workerName, country, flag]
-            });
-
-            await ctx.reply(`✅ Selesai! Worker Anda aktif: ${subdomain}.\nSiap digunakan untuk WS/SNI/Wildcard Pribadi.`, { reply_markup: backToMainKeyboard });
-
-        } catch (e: any) {
-            await ctx.reply(`❌ Gagal: ${e.message}`, { reply_markup: backToMainKeyboard });
+    if (customDomainInput !== 'skip' && customDomainInput.includes('.')) {
+        // Find matching zone
+        const matched = zones.find(z => customDomainInput.endsWith(z.name));
+        if (matched) {
+            zoneId = matched.id;
+            subdomain = customDomainInput;
+            await ctx.reply(`✅ Domain valid! Menggunakan Zone: ${matched.name}`);
+        } else {
+            await ctx.reply("⚠️ Domain tidak ditemukan di akun Cloudflare ini. Menggunakan default workers.dev.");
         }
-    } else {
-        await ctx.reply("⚠️ Gagal, data tidak lengkap.", { reply_markup: backToMainKeyboard });
+    }
+
+    await ctx.reply("🚀 Deploying Worker...");
+
+    try {
+        // Read Worker Script
+        const scriptPath = path.join(process.cwd(), "src/templates/worker.js");
+        const scriptContent = await conversation.external(() => fs.readFile(scriptPath, "utf8"));
+
+        // Deploy
+        await conversation.external(() => uploadWorker(auth, workerName, scriptContent));
+
+        // Bind Domain if needed
+        if (zoneId && subdomain === customDomainInput) {
+            await ctx.reply("⚙️ Binding Custom Domain...");
+            try {
+                await conversation.external(() => addWorkerDomain(auth, accountId, workerName, subdomain, zoneId));
+                await ctx.reply("✅ Custom Domain Bound!");
+            } catch (e: any) {
+                await ctx.reply(`⚠️ Gagal Bind Domain: ${e.message}`);
+            }
+        }
+
+        // Save to DB
+        if (ctx.from) {
+            await conversation.external(() => db.execute({
+                sql: "INSERT OR IGNORE INTO users (id, username, full_name, role) VALUES (?, ?, ?, 'admin')",
+                args: [ctx.from!.id, ctx.from!.username || "user", ctx.from!.first_name || "User"]
+            }));
+        }
+
+        // Save Account
+        await conversation.external(() => db.execute({
+            sql: "INSERT OR IGNORE INTO cf_accounts (email, api_key, account_id, owner_id) VALUES (?, ?, ?, ?)",
+            args: [email, apiKey, accountId, ctx.from?.id || 0]
+        }));
+
+        const accRes = await conversation.external(() => db.execute({ sql: "SELECT id FROM cf_accounts WHERE account_id=?", args: [accountId] }));
+        const dbAccId = accRes.rows[0]?.id;
+
+        // Save Worker
+        await conversation.external(() => db.execute({
+            sql: "INSERT INTO workers (subdomain, account_id, worker_name, type, country_code, flag) VALUES (?, ?, ?, 'vless', 'ID', '🇮🇩')",
+            args: [subdomain, dbAccId, workerName]
+        }));
+
+        await ctx.reply(`✅ **SUKSES!**\n\nWorker: \`${workerName}\`\nDomain: \`${subdomain}\`\nAkun: ${email}\n\nSiap digunakan!`, { parse_mode: "Markdown", reply_markup: backToMainKeyboard });
+
+    } catch (e: any) {
+        await ctx.reply(`❌ Error Deploy: ${e.message}`, { reply_markup: backToMainKeyboard });
     }
 }
 
-// Conversation: Admin Add Proxy (With Wildcard)
+// Conversation: Manual Add Proxy
 export async function addProxyConversation(conversation: MyConversation, ctx: MyContext) {
-    // 1. Ask Target Account ID
-    const prompt1 = await ctx.reply("🆔 Masukkan **Account ID Cloudflare** target deployment:");
-    const accMsg = await conversation.wait();
-    const accountId = accMsg.message?.text;
+    await ctx.reply("🌐 Masukkan **Domain/IP Proxy**:");
+    const hostMsg = await conversation.wait();
+    const host = hostMsg.message?.text;
 
-    // Auto-delete
-    if (accMsg.message?.message_id) await ctx.api.deleteMessage(ctx.chat?.id!, accMsg.message.message_id).catch(() => { });
+    if (hostMsg.message?.message_id) await ctx.api.deleteMessage(ctx.chat?.id!, hostMsg.message.message_id).catch(() => { });
 
-    if (!accountId) return;
+    if (!host) return;
 
-    // 2. Ask Worker Name
-    const prompt2 = await ctx.reply("📝 Masukkan **Nama Worker** (ex: vless-sg1):");
+    await ctx.reply("📝 Masukkan **Nama Proxy**:");
     const nameMsg = await conversation.wait();
-    const workerName = nameMsg.message?.text || `vless-${Date.now()}`;
+    const name = nameMsg.message?.text || "Proxy";
 
-    // Auto-delete
     if (nameMsg.message?.message_id) await ctx.api.deleteMessage(ctx.chat?.id!, nameMsg.message.message_id).catch(() => { });
 
-
-    // Need to Authentication for this Account ID
-    // Logic: Look up in DB for credentials associated with this Account ID
-    let auth = null;
-    let dbId = 0;
-
+    // Save
     try {
-        const accRes = await db.execute({ sql: "SELECT id, email, api_key FROM cf_accounts WHERE account_id = ? LIMIT 1", args: [accountId] });
-        if (accRes.rows.length > 0) {
-            const r = accRes.rows[0];
-            dbId = r.id as number;
-            auth = {
-                email: r.email as string,
-                apiKey: r.api_key as string,
-                accountId: accountId
-            };
-        } else {
-            return ctx.reply("⚠️ Akun ID tidak ditemukan di database. Tambahkan akun dulu di menu Admin.", { reply_markup: backToMainKeyboard });
-        }
-    } catch (e) {
-        return ctx.reply("⚠️ DB Error.", { reply_markup: backToMainKeyboard });
-    }
-
-    let subdomain = `${workerName}.${accountId.substring(0, 4)}.workers.dev`; // Default
-    let country = "ID";
-    let flag = "🇮🇩";
-
-    // 3. Ask Custom Domain
-    await ctx.reply("🌐 Gunakan **Custom Domain**? (Ketik domain atau 'skip'):");
-    const domMsg = await conversation.wait();
-
-    // Auto-delete
-    if (domMsg.message?.message_id) await ctx.api.deleteMessage(ctx.chat?.id!, domMsg.message.message_id).catch(() => { });
-
-
-    if (domMsg.message?.text && domMsg.message.text.toLowerCase() !== 'skip') {
-        const customDomain = domMsg.message.text.toLowerCase();
-        const zonePrompt = await ctx.reply(`🆔 Kirimkan **Zone ID** untuk ${customDomain}:`);
-        const zoneMsg = await conversation.wait();
-        const zoneId = zoneMsg.message?.text;
-
-        // Auto-delete
-        if (zoneMsg.message?.message_id) await ctx.api.deleteMessage(ctx.chat?.id!, zoneMsg.message.message_id).catch(() => { });
-
-        if (zoneId) {
-            await ctx.api.editMessageText(ctx.chat?.id!, zonePrompt.message_id, "⚙️ Binding Custom Domain & Routing Wildcard...");
-            try {
-                // REAL API CALL
-                await addWorkerDomain(auth, accountId, workerName, customDomain, zoneId);
-
-                // Add Wildcard Route
-                try {
-                    await addWorkerRoute(auth, zoneId, `*.${customDomain}/*`, workerName);
-                } catch (routeErr: any) {
-                    // Log fail but proceed
-                }
-
-                subdomain = customDomain;
-                country = "SG";
-                flag = "🇸🇬";
-                await ctx.api.editMessageText(ctx.chat?.id!, zonePrompt.message_id, `✅ Routing Wildcard (*.${customDomain}) Berhasil!`);
-            } catch (err: any) {
-                await ctx.api.editMessageText(ctx.chat?.id!, zonePrompt.message_id, `⚠️ Gagal bind domain: ${err.message}`);
-            }
-        }
-    }
-
-    try {
-        const deployMsg = await ctx.reply(`⏳ Deploying ${workerName}...`);
-
-        // REAL API CALL: Upload Worker
-        const scriptContent = `
-        export default {
-          async fetch(request) { return new Response("VLESS Admin Node"); }
-        };`;
-        await uploadWorker(auth, workerName, scriptContent);
-
-        await db.execute({
-            sql: "INSERT INTO workers (subdomain, account_id, worker_name, type, country_code, flag) VALUES (?, ?, ?, 'vless', ?, ?)",
-            args: [subdomain, dbId, workerName, country, flag]
-        });
-
-        await ctx.api.editMessageText(ctx.chat?.id!, deployMsg.message_id, `✅ Proxy Admin Siap!\nDomain: ${subdomain}\nWildcard/SNI: Aktif.`, { reply_markup: backToMainKeyboard });
+        await conversation.external(() => db.execute({
+            sql: "INSERT INTO workers (subdomain, account_id, worker_name, type, country_code, flag) VALUES (?, NULL, ?, 'vless', 'ID', '🇮🇩')",
+            args: [host, name]
+        }));
+        await ctx.reply(`✅ Proxy **${name}** (${host}) berhasil disimpan!`, { reply_markup: backToMainKeyboard });
     } catch (e: any) {
-        await ctx.reply(`❌ Error: ${e.message}`, { reply_markup: backToMainKeyboard });
+        await ctx.reply(`❌ Gagal simpan: ${e.message}`, { reply_markup: backToMainKeyboard });
     }
 }
 
